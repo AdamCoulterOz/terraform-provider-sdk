@@ -7,9 +7,9 @@ using Tfplugin6;
 
 namespace TerraformPluginDotnet.Types;
 
-public static class TerraformDynamicValueSerializer
+internal static class TerraformDynamicValueSerializer
 {
-    public static TerraformValue DecodeDynamicValue(DynamicValue dynamicValue, TerraformType type)
+    public static TerraformDynamicValue DecodeDynamicValue(DynamicValue dynamicValue, TerraformType type)
     {
         if (dynamicValue.Msgpack.Length > 0)
         {
@@ -24,13 +24,13 @@ public static class TerraformDynamicValueSerializer
         throw new InvalidOperationException("DynamicValue did not contain msgpack or JSON data.");
     }
 
-    public static DynamicValue EncodeDynamicValue(TerraformValue value, TerraformType type) =>
+    public static DynamicValue EncodeDynamicValue(TerraformDynamicValue value, TerraformType type) =>
         new()
         {
             Msgpack = Google.Protobuf.ByteString.CopyFrom(EncodeMsgPack(value, type)),
         };
 
-    public static TerraformValue DecodeMsgPack(ReadOnlyMemory<byte> bytes, TerraformType type)
+    public static TerraformDynamicValue DecodeMsgPack(ReadOnlyMemory<byte> bytes, TerraformType type)
     {
         var reader = new MessagePackReader(bytes);
         var value = ReadMsgPackValue(ref reader, type);
@@ -43,10 +43,10 @@ public static class TerraformDynamicValueSerializer
         return value;
     }
 
-    public static TerraformValue DecodeJsonValue(ReadOnlySpan<byte> bytes, TerraformType type) =>
+    public static TerraformDynamicValue DecodeJsonValue(ReadOnlySpan<byte> bytes, TerraformType type) =>
         DecodeJson(bytes, type);
 
-    public static byte[] EncodeMsgPack(TerraformValue value, TerraformType type)
+    public static byte[] EncodeMsgPack(TerraformDynamicValue value, TerraformType type)
     {
         var buffer = new ArrayBufferWriter<byte>();
         var writer = new MessagePackWriter(buffer);
@@ -55,12 +55,12 @@ public static class TerraformDynamicValueSerializer
         return buffer.WrittenSpan.ToArray();
     }
 
-    private static TerraformValue ReadMsgPackValue(ref MessagePackReader reader, TerraformType type)
+    private static TerraformDynamicValue ReadMsgPackValue(ref MessagePackReader reader, TerraformType type)
     {
         if (reader.NextMessagePackType == MessagePackType.Extension)
         {
             reader.Skip();
-            return TerraformValue.Unknown(type);
+            return TerraformDynamicValue.Unknown(type);
         }
 
         if (type.Equals(TerraformType.Dynamic))
@@ -70,14 +70,14 @@ public static class TerraformDynamicValueSerializer
 
         if (reader.TryReadNil())
         {
-            return TerraformValue.Null(type);
+            return TerraformDynamicValue.Null(type);
         }
 
         return type switch
         {
-            TerraformPrimitiveType primitive when primitive.Kind == "string" => TerraformValue.String(reader.ReadString() ?? string.Empty),
-            TerraformPrimitiveType primitive when primitive.Kind == "number" => TerraformValue.Number(ReadNumber(ref reader)),
-            TerraformPrimitiveType primitive when primitive.Kind == "bool" => TerraformValue.Bool(reader.ReadBoolean()),
+            TerraformPrimitiveType primitive when primitive.Kind == "string" => TerraformDynamicValue.String(reader.ReadString() ?? string.Empty),
+            TerraformPrimitiveType primitive when primitive.Kind == "number" => TerraformDynamicValue.Number(ReadNumber(ref reader)),
+            TerraformPrimitiveType primitive when primitive.Kind == "bool" => TerraformDynamicValue.Bool(reader.ReadBoolean()),
             TerraformListType list => ReadListValue(ref reader, list.ElementType, false),
             TerraformSetType set => ReadListValue(ref reader, set.ElementType, true),
             TerraformMapType map => ReadMapValue(ref reader, map.ElementType),
@@ -87,13 +87,13 @@ public static class TerraformDynamicValueSerializer
         };
     }
 
-    private static TerraformValue ReadDynamicMsgPackValue(ref MessagePackReader reader)
+    private static TerraformDynamicValue ReadDynamicMsgPackValue(ref MessagePackReader reader)
     {
         var arrayLength = reader.ReadArrayHeader();
 
         if (arrayLength == -1)
         {
-            return TerraformValue.Null(TerraformType.Dynamic);
+            return TerraformDynamicValue.Null(TerraformType.Dynamic);
         }
 
         if (arrayLength != 2)
@@ -104,13 +104,13 @@ public static class TerraformDynamicValueSerializer
         var typeBytes = reader.ReadBytes() ?? throw new InvalidOperationException("Dynamic Terraform values must include encoded type bytes.");
         var actualType = TerraformType.ParseTypeJson(typeBytes.ToArray());
         var actualValue = ReadMsgPackValue(ref reader, actualType);
-        return TerraformValue.Known(TerraformType.Dynamic, actualValue);
+        return TerraformDynamicValue.Known(TerraformType.Dynamic, actualValue);
     }
 
-    private static TerraformValue ReadListValue(ref MessagePackReader reader, TerraformType elementType, bool isSet)
+    private static TerraformDynamicValue ReadListValue(ref MessagePackReader reader, TerraformType elementType, bool isSet)
     {
         var length = reader.ReadArrayHeader();
-        var values = new TerraformValue[length];
+        var values = new TerraformDynamicValue[length];
 
         for (var index = 0; index < length; index++)
         {
@@ -118,11 +118,11 @@ public static class TerraformDynamicValueSerializer
         }
 
         return isSet
-            ? TerraformValue.Set(elementType, values)
-            : TerraformValue.List(elementType, values);
+            ? TerraformDynamicValue.Set(elementType, values)
+            : TerraformDynamicValue.List(elementType, values);
     }
 
-    private static TerraformValue ReadTupleValue(ref MessagePackReader reader, IReadOnlyList<TerraformType> elementTypes)
+    private static TerraformDynamicValue ReadTupleValue(ref MessagePackReader reader, IReadOnlyList<TerraformType> elementTypes)
     {
         var length = reader.ReadArrayHeader();
 
@@ -131,20 +131,20 @@ public static class TerraformDynamicValueSerializer
             throw new InvalidOperationException($"Terraform tuple expected {elementTypes.Count} elements, saw {length}.");
         }
 
-        var values = new TerraformValue[length];
+        var values = new TerraformDynamicValue[length];
 
         for (var index = 0; index < length; index++)
         {
             values[index] = ReadMsgPackValue(ref reader, elementTypes[index]);
         }
 
-        return TerraformValue.Tuple(elementTypes, values);
+        return TerraformDynamicValue.Tuple(elementTypes, values);
     }
 
-    private static TerraformValue ReadMapValue(ref MessagePackReader reader, TerraformType elementType)
+    private static TerraformDynamicValue ReadMapValue(ref MessagePackReader reader, TerraformType elementType)
     {
         var length = reader.ReadMapHeader();
-        var values = new Dictionary<string, TerraformValue>(length, StringComparer.Ordinal);
+        var values = new Dictionary<string, TerraformDynamicValue>(length, StringComparer.Ordinal);
 
         for (var index = 0; index < length; index++)
         {
@@ -152,10 +152,10 @@ public static class TerraformDynamicValueSerializer
             values[key] = ReadMsgPackValue(ref reader, elementType);
         }
 
-        return TerraformValue.Map(elementType, values);
+        return TerraformDynamicValue.Map(elementType, values);
     }
 
-    private static TerraformValue ReadObjectValue(ref MessagePackReader reader, TerraformObjectType objectType)
+    private static TerraformDynamicValue ReadObjectValue(ref MessagePackReader reader, TerraformObjectType objectType)
     {
         var length = reader.ReadMapHeader();
 
@@ -164,7 +164,7 @@ public static class TerraformDynamicValueSerializer
             throw new InvalidOperationException($"Terraform object expected {objectType.AttributeTypes.Count} attributes, saw {length}.");
         }
 
-        var values = new Dictionary<string, TerraformValue>(length, StringComparer.Ordinal);
+        var values = new Dictionary<string, TerraformDynamicValue>(length, StringComparer.Ordinal);
 
         for (var index = 0; index < length; index++)
         {
@@ -178,7 +178,7 @@ public static class TerraformDynamicValueSerializer
             values[key] = ReadMsgPackValue(ref reader, attributeType);
         }
 
-        return TerraformValue.Object(objectType, values);
+        return TerraformDynamicValue.Object(objectType, values);
     }
 
     private static TerraformNumber ReadNumber(ref MessagePackReader reader)
@@ -207,7 +207,7 @@ public static class TerraformDynamicValueSerializer
         }
     }
 
-    private static void WriteMsgPackValue(ref MessagePackWriter writer, TerraformValue value, TerraformType type)
+    private static void WriteMsgPackValue(ref MessagePackWriter writer, TerraformDynamicValue value, TerraformType type)
     {
         if (type.Equals(TerraformType.Dynamic) && value.Type.Equals(TerraformType.Dynamic) is false)
         {
@@ -261,7 +261,7 @@ public static class TerraformDynamicValueSerializer
         }
     }
 
-    private static void WriteSequence(ref MessagePackWriter writer, IReadOnlyList<TerraformValue> values, TerraformType elementType)
+    private static void WriteSequence(ref MessagePackWriter writer, IReadOnlyList<TerraformDynamicValue> values, TerraformType elementType)
     {
         writer.WriteArrayHeader(values.Count);
 
@@ -271,7 +271,7 @@ public static class TerraformDynamicValueSerializer
         }
     }
 
-    private static void WriteTuple(ref MessagePackWriter writer, IReadOnlyList<TerraformValue> values, IReadOnlyList<TerraformType> elementTypes)
+    private static void WriteTuple(ref MessagePackWriter writer, IReadOnlyList<TerraformDynamicValue> values, IReadOnlyList<TerraformType> elementTypes)
     {
         writer.WriteArrayHeader(values.Count);
 
@@ -281,7 +281,7 @@ public static class TerraformDynamicValueSerializer
         }
     }
 
-    private static void WriteMap(ref MessagePackWriter writer, IReadOnlyDictionary<string, TerraformValue> values, TerraformType elementType)
+    private static void WriteMap(ref MessagePackWriter writer, IReadOnlyDictionary<string, TerraformDynamicValue> values, TerraformType elementType)
     {
         writer.WriteMapHeader(values.Count);
 
@@ -292,7 +292,7 @@ public static class TerraformDynamicValueSerializer
         }
     }
 
-    private static void WriteObject(ref MessagePackWriter writer, IReadOnlyDictionary<string, TerraformValue> values, TerraformObjectType objectType)
+    private static void WriteObject(ref MessagePackWriter writer, IReadOnlyDictionary<string, TerraformDynamicValue> values, TerraformObjectType objectType)
     {
         writer.WriteMapHeader(objectType.AttributeTypes.Count);
 
@@ -331,17 +331,17 @@ public static class TerraformDynamicValueSerializer
         writer.Write(number.Raw);
     }
 
-    private static TerraformValue DecodeJson(ReadOnlySpan<byte> bytes, TerraformType type)
+    private static TerraformDynamicValue DecodeJson(ReadOnlySpan<byte> bytes, TerraformType type)
     {
         using var document = JsonDocument.Parse(bytes.ToArray());
         return DecodeJson(document.RootElement, type);
     }
 
-    private static TerraformValue DecodeJson(JsonElement element, TerraformType type)
+    private static TerraformDynamicValue DecodeJson(JsonElement element, TerraformType type)
     {
         if (element.ValueKind == JsonValueKind.Null)
         {
-            return TerraformValue.Null(type);
+            return TerraformDynamicValue.Null(type);
         }
 
         if (type.Equals(TerraformType.Dynamic))
@@ -351,21 +351,21 @@ public static class TerraformDynamicValueSerializer
 
         return type switch
         {
-            TerraformPrimitiveType primitive when primitive.Kind == "string" => TerraformValue.String(element.GetString() ?? string.Empty),
-            TerraformPrimitiveType primitive when primitive.Kind == "number" => TerraformValue.Number(TerraformNumber.Parse(element.GetRawText())),
-            TerraformPrimitiveType primitive when primitive.Kind == "bool" => TerraformValue.Bool(element.GetBoolean()),
-            TerraformListType list => TerraformValue.List(list.ElementType, element.EnumerateArray().Select(item => DecodeJson(item, list.ElementType)).ToArray()),
-            TerraformSetType set => TerraformValue.Set(set.ElementType, element.EnumerateArray().Select(item => DecodeJson(item, set.ElementType)).ToArray()),
-            TerraformMapType map => TerraformValue.Map(
+            TerraformPrimitiveType primitive when primitive.Kind == "string" => TerraformDynamicValue.String(element.GetString() ?? string.Empty),
+            TerraformPrimitiveType primitive when primitive.Kind == "number" => TerraformDynamicValue.Number(TerraformNumber.Parse(element.GetRawText())),
+            TerraformPrimitiveType primitive when primitive.Kind == "bool" => TerraformDynamicValue.Bool(element.GetBoolean()),
+            TerraformListType list => TerraformDynamicValue.List(list.ElementType, element.EnumerateArray().Select(item => DecodeJson(item, list.ElementType)).ToArray()),
+            TerraformSetType set => TerraformDynamicValue.Set(set.ElementType, element.EnumerateArray().Select(item => DecodeJson(item, set.ElementType)).ToArray()),
+            TerraformMapType map => TerraformDynamicValue.Map(
                 map.ElementType,
                 element.EnumerateObject().ToDictionary(
                     static property => property.Name,
                     property => DecodeJson(property.Value, map.ElementType),
                     StringComparer.Ordinal)),
-            TerraformTupleType tuple => TerraformValue.Tuple(
+            TerraformTupleType tuple => TerraformDynamicValue.Tuple(
                 tuple.ElementTypes,
                 element.EnumerateArray().Select((item, index) => DecodeJson(item, tuple.ElementTypes[index])).ToArray()),
-            TerraformObjectType obj => TerraformValue.Object(
+            TerraformObjectType obj => TerraformDynamicValue.Object(
                 obj,
                 element.EnumerateObject().ToDictionary(
                     static property => property.Name,

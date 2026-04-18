@@ -4,7 +4,7 @@ using TerraformPluginDotnet.Types;
 
 namespace TerraformPluginDotnet.Provider;
 
-public interface ITerraformResource
+internal interface ITerraformResource
 {
     TerraformComponentSchema Schema { get; }
 
@@ -15,7 +15,7 @@ public interface ITerraformResource
     ValueTask<TerraformImportResult> ImportAsync(TerraformResourceImportRequest request, CancellationToken cancellationToken);
 }
 
-public abstract class TerraformResourceBase : ITerraformResource
+internal abstract class TerraformResourceBase : ITerraformResource
 {
     public abstract TerraformComponentSchema Schema { get; }
 

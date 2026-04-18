@@ -2,11 +2,14 @@ using Grpc.HealthCheck;
 using Grpc.Health.V1;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using System.Net;
 using System.Security.Authentication;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -16,7 +19,14 @@ namespace TerraformPluginDotnet.Hosting;
 
 public static class TerraformProviderHost
 {
-    public static async Task<int> RunAsync(ITerraformProvider provider, string[] args, CancellationToken cancellationToken = default)
+    public static Task<int> RunAsync<TConfig, TProviderState>(
+        TerraformProvider<TConfig, TProviderState> provider,
+        string[] args,
+        CancellationToken cancellationToken = default)
+        where TConfig : new() =>
+        RunAsync(provider.ToInternalProvider(), args, cancellationToken);
+
+    internal static async Task<int> RunAsync(ITerraformProvider provider, string[] args, CancellationToken cancellationToken = default)
     {
         if (!IsPluginLaunch())
         {
@@ -26,7 +36,6 @@ public static class TerraformProviderHost
             return 1;
         }
 
-        var port = ReserveTcpPort();
         var builder = WebApplication.CreateBuilder(args);
         var healthService = new HealthServiceImpl();
         var mutualTls = TryCreateMutualTls();
@@ -35,8 +44,9 @@ public static class TerraformProviderHost
         builder.WebHost.ConfigureKestrel(
             options =>
             {
-                options.ListenLocalhost(
-                    port,
+                options.Listen(
+                    IPAddress.Loopback,
+                    0,
                     listenOptions =>
                     {
                         listenOptions.Protocols = HttpProtocols.Http2;
@@ -80,10 +90,12 @@ public static class TerraformProviderHost
 
         await app.StartAsync(cancellationToken).ConfigureAwait(false);
 
+        var endpoint = GetBoundLoopbackEndpoint(app);
+
         var serverCertificate = mutualTls is null
             ? string.Empty
             : Convert.ToBase64String(mutualTls.ServerCertificate.RawData).TrimEnd('=');
-        var handshakeLine = $"{TerraformPluginProtocol.CoreProtocolVersion}|{TerraformPluginProtocol.ApplicationProtocolVersion}|tcp|127.0.0.1:{port}|grpc|{serverCertificate}";
+        var handshakeLine = $"{TerraformPluginProtocol.CoreProtocolVersion}|{TerraformPluginProtocol.ApplicationProtocolVersion}|tcp|{endpoint.Address}:{endpoint.Port}|grpc|{serverCertificate}";
         Console.Out.WriteLine(handshakeLine);
         Console.Out.Flush();
         Console.SetOut(TextWriter.Null);
@@ -98,13 +110,6 @@ public static class TerraformProviderHost
             TerraformPluginProtocol.MagicCookieValue,
             StringComparison.Ordinal);
 
-    private static int ReserveTcpPort()
-    {
-        using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
-        listener.Start();
-        return ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
-    }
-
     private static PluginMutualTls? TryCreateMutualTls()
     {
         var clientCertificatePem = Environment.GetEnvironmentVariable(TerraformPluginProtocol.ClientCertificateEnvironmentVariable);
@@ -115,6 +120,25 @@ public static class TerraformProviderHost
         }
 
         var clientCertificate = X509Certificate2.CreateFromPem(clientCertificatePem);
+        var serverCertificate = CreateServerCertificate();
+        return new PluginMutualTls(clientCertificate, serverCertificate);
+    }
+
+    internal static IPEndPoint GetBoundLoopbackEndpoint(WebApplication app)
+    {
+        var addressesFeature = app.Services.GetRequiredService<IServer>().Features.Get<IServerAddressesFeature>()
+            ?? throw new InvalidOperationException("Kestrel did not expose bound server addresses.");
+
+        var loopbackAddress = addressesFeature.Addresses
+            .Select(static address => new Uri(address))
+            .FirstOrDefault(static uri => uri.Host == IPAddress.Loopback.ToString())
+            ?? throw new InvalidOperationException("Could not determine the bound loopback server address.");
+
+        return new IPEndPoint(IPAddress.Parse(loopbackAddress.Host), loopbackAddress.Port);
+    }
+
+    internal static X509Certificate2 CreateServerCertificate()
+    {
         using var serverKey = ECDsa.Create(ECCurve.NamedCurves.nistP521);
         var certificateRequest = new CertificateRequest(
             "CN=localhost",
@@ -140,14 +164,12 @@ public static class TerraformProviderHost
 
         var subjectAlternativeName = new SubjectAlternativeNameBuilder();
         subjectAlternativeName.AddDnsName("localhost");
+        subjectAlternativeName.AddIpAddress(IPAddress.Loopback);
         certificateRequest.CertificateExtensions.Add(subjectAlternativeName.Build());
 
         var notBefore = DateTimeOffset.UtcNow.AddSeconds(-30);
         var notAfter = DateTimeOffset.UtcNow.AddHours(262980);
-        var serialNumber = RandomNumberGenerator.GetBytes(16);
-        var serverCertificate = certificateRequest.CreateSelfSigned(notBefore, notAfter);
-
-        return new PluginMutualTls(clientCertificate, serverCertificate);
+        return certificateRequest.CreateSelfSigned(notBefore, notAfter);
     }
 
     private sealed record PluginMutualTls(

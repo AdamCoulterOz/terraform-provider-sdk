@@ -3,36 +3,35 @@ using TerraformPluginDotnet.Types;
 
 namespace TerraformPluginDotnet.Provider;
 
-public sealed record TerraformValidateResult(IReadOnlyList<TerraformDiagnostic>? Diagnostics = null)
+internal sealed record TerraformValidateResult(IReadOnlyList<TerraformDiagnostic>? Diagnostics = null)
 {
     public static TerraformValidateResult Empty { get; } = new([]);
 }
 
-public sealed record TerraformConfigureResult(
+internal sealed record TerraformConfigureResult(
     object? ProviderState = null,
     IReadOnlyList<TerraformDiagnostic>? Diagnostics = null);
 
-public sealed record TerraformReadResult(
-    TerraformValue NewState,
+internal sealed record TerraformReadResult(
+    TerraformDynamicValue NewState,
     byte[]? PrivateState = null,
     IReadOnlyList<TerraformDiagnostic>? Diagnostics = null);
 
-public sealed record TerraformPlanResult(
-    TerraformValue PlannedState,
+internal sealed record TerraformPlanResult(
+    TerraformDynamicValue PlannedState,
     byte[]? PlannedPrivateState = null,
     IReadOnlyList<TerraformAttributePath>? RequiresReplace = null,
     IReadOnlyList<TerraformDiagnostic>? Diagnostics = null);
 
-public sealed record TerraformApplyResult(
-    TerraformValue NewState,
+internal sealed record TerraformApplyResult(
+    TerraformDynamicValue NewState,
     byte[]? PrivateState = null,
     IReadOnlyList<TerraformDiagnostic>? Diagnostics = null);
 
-public sealed record TerraformImportResource(
-    string TypeName,
-    TerraformValue State,
+internal sealed record TerraformImportResource(
+    TerraformDynamicValue State,
     byte[]? PrivateState = null);
 
-public sealed record TerraformImportResult(
+internal sealed record TerraformImportResult(
     IReadOnlyList<TerraformImportResource> Resources,
     IReadOnlyList<TerraformDiagnostic>? Diagnostics = null);

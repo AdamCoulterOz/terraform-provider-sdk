@@ -2,41 +2,41 @@ using TerraformPluginDotnet.Types;
 
 namespace TerraformPluginDotnet.Provider;
 
-public sealed record TerraformProviderValidateRequest(TerraformValue Config);
+internal sealed record TerraformProviderValidateRequest(TerraformDynamicValue Config);
 
-public sealed record TerraformProviderConfigureRequest(
-    TerraformValue Config,
+internal sealed record TerraformProviderConfigureRequest(
+    TerraformDynamicValue Config,
     string TerraformVersion,
     bool DeferralAllowed);
 
-public sealed record TerraformResourceValidateRequest(TerraformValue Config);
+internal sealed record TerraformResourceValidateRequest(TerraformDynamicValue Config);
 
-public sealed record TerraformDataSourceValidateRequest(TerraformValue Config);
+internal sealed record TerraformDataSourceValidateRequest(TerraformDynamicValue Config);
 
-public sealed record TerraformResourceReadRequest(
-    TerraformValue CurrentState,
+internal sealed record TerraformResourceReadRequest(
+    TerraformDynamicValue CurrentState,
     byte[] PrivateState,
     object? ProviderState);
 
-public sealed record TerraformResourcePlanRequest(
-    TerraformValue PriorState,
-    TerraformValue ProposedNewState,
-    TerraformValue Config,
+internal sealed record TerraformResourcePlanRequest(
+    TerraformDynamicValue PriorState,
+    TerraformDynamicValue ProposedNewState,
+    TerraformDynamicValue Config,
     byte[] PriorPrivateState,
     object? ProviderState);
 
-public sealed record TerraformResourceApplyRequest(
-    TerraformValue PriorState,
-    TerraformValue PlannedState,
-    TerraformValue Config,
+internal sealed record TerraformResourceApplyRequest(
+    TerraformDynamicValue PriorState,
+    TerraformDynamicValue PlannedState,
+    TerraformDynamicValue Config,
     byte[] PlannedPrivateState,
     object? ProviderState);
 
-public sealed record TerraformDataSourceReadRequest(
-    TerraformValue Config,
+internal sealed record TerraformDataSourceReadRequest(
+    TerraformDynamicValue Config,
     object? ProviderState);
 
-public sealed record TerraformResourceImportRequest(
+internal sealed record TerraformResourceImportRequest(
     string TypeName,
     string Id,
     object? ProviderState);

@@ -74,7 +74,7 @@ public abstract class TerraformType : IEquatable<TerraformType>
         return new TerraformObjectType(attributeTypes, optionalAttributes);
     }
 
-    public static TerraformType CommonType(IEnumerable<TerraformValue> values)
+    internal static TerraformType CommonType(IEnumerable<TerraformDynamicValue> values)
     {
         TerraformType? current = null;
 

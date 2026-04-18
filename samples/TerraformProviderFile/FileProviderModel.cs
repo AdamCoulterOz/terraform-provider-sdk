@@ -1,6 +1,5 @@
 using System.Security.Cryptography;
 using System.Text;
-using TerraformPluginDotnet.Provider;
 using TerraformPluginDotnet.Schema;
 using TerraformPluginDotnet.Types;
 
@@ -16,72 +15,34 @@ internal sealed record FileMaterializedState(
 
 internal static class FileProviderModel
 {
-    public static readonly TerraformComponentSchema ResourceSchema =
-        new(
-            new TerraformSchemaBlock(
-                new Dictionary<string, TerraformSchemaAttribute>(StringComparer.Ordinal)
-                {
-                    ["path"] = new("path", TerraformType.String, Required: true, Description: "Path to the managed file."),
-                    ["content"] = new("content", TerraformType.String, Required: true, Description: "Desired file content."),
-                    ["absolute_path"] = new("absolute_path", TerraformType.String, Computed: true, Description: "Canonical absolute path."),
-                    ["sha256"] = new("sha256", TerraformType.String, Computed: true, Description: "SHA-256 of the file content."),
-                    ["id"] = new("id", TerraformType.String, Computed: true, Description: "Provider-assigned resource identifier."),
-                }));
+    public static FileManagedResourceModel ToResourceModel(FileMaterializedState state) =>
+        new()
+        {
+            Path = TF<string>.Known(state.Path),
+            Content = TF<string>.Known(state.Content),
+            AbsolutePath = TF<string>.Known(state.AbsolutePath),
+            Sha256 = TF<string>.Known(state.Sha256),
+            Id = TF<string>.Known(state.AbsolutePath),
+        };
 
-    public static readonly TerraformComponentSchema DataSourceSchema =
-        new(
-            new TerraformSchemaBlock(
-                new Dictionary<string, TerraformSchemaAttribute>(StringComparer.Ordinal)
-                {
-                    ["path"] = new("path", TerraformType.String, Required: true, Description: "Path to the file to read."),
-                    ["content"] = new("content", TerraformType.String, Computed: true, Description: "Current file content."),
-                    ["absolute_path"] = new("absolute_path", TerraformType.String, Computed: true, Description: "Canonical absolute path."),
-                    ["sha256"] = new("sha256", TerraformType.String, Computed: true, Description: "SHA-256 of the file content."),
-                }));
+    public static FileReadDataSourceModel ToDataSourceModel(FileMaterializedState state) =>
+        new()
+        {
+            Path = TF<string>.Known(state.Path),
+            Content = TF<string>.Known(state.Content),
+            AbsolutePath = TF<string>.Known(state.AbsolutePath),
+            Sha256 = TF<string>.Known(state.Sha256),
+        };
 
-    private static readonly TerraformObjectType ResourceObjectType = ResourceSchema.Block.ValueType();
-    private static readonly TerraformObjectType DataSourceObjectType = DataSourceSchema.Block.ValueType();
-
-    public static FileProviderState RequireProviderState(object? providerState) =>
-        providerState as FileProviderState
-        ?? throw new InvalidOperationException("The file provider has not been configured.");
-
-    public static TerraformValue NullResourceState() => TerraformValue.Null(ResourceObjectType);
-
-    public static TerraformValue ToResourceValue(FileMaterializedState state) =>
-        TerraformValue.Object(
-            ResourceObjectType,
-            new Dictionary<string, TerraformValue>(StringComparer.Ordinal)
-            {
-                ["path"] = TerraformValue.String(state.Path),
-                ["content"] = TerraformValue.String(state.Content),
-                ["absolute_path"] = TerraformValue.String(state.AbsolutePath),
-                ["sha256"] = TerraformValue.String(state.Sha256),
-                ["id"] = TerraformValue.String(state.AbsolutePath),
-            });
-
-    public static TerraformValue ToDataSourceValue(FileMaterializedState state) =>
-        TerraformValue.Object(
-            DataSourceObjectType,
-            new Dictionary<string, TerraformValue>(StringComparer.Ordinal)
-            {
-                ["path"] = TerraformValue.String(state.Path),
-                ["content"] = TerraformValue.String(state.Content),
-                ["absolute_path"] = TerraformValue.String(state.AbsolutePath),
-                ["sha256"] = TerraformValue.String(state.Sha256),
-            });
-
-    public static TerraformValue UnknownResourcePlannedState(TerraformValue pathValue, TerraformValue contentValue) =>
-        TerraformValue.Object(
-            ResourceObjectType,
-            new Dictionary<string, TerraformValue>(StringComparer.Ordinal)
-            {
-                ["path"] = pathValue,
-                ["content"] = contentValue,
-                ["absolute_path"] = TerraformValue.Unknown(TerraformType.String),
-                ["sha256"] = TerraformValue.Unknown(TerraformType.String),
-                ["id"] = TerraformValue.Unknown(TerraformType.String),
-            });
+    public static FileManagedResourceModel UnknownResourcePlannedState(TF<string> pathValue, TF<string> contentValue) =>
+        new()
+        {
+            Path = pathValue,
+            Content = contentValue,
+            AbsolutePath = TF<string>.Unknown(),
+            Sha256 = TF<string>.Unknown(),
+            Id = TF<string>.Unknown(),
+        };
 
     public static FileMaterializedState Materialize(FileProviderState providerState, string path, string content)
     {
@@ -108,26 +69,57 @@ internal static class FileProviderModel
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
-    public static TerraformValidateResult ValidatePathValue(TerraformValue config, string attributeName)
+    public static IReadOnlyList<TerraformPluginDotnet.Diagnostics.TerraformDiagnostic> ValidatePathValue(TF<string> pathValue, string attributeName)
     {
-        var pathValue = config.GetAttribute(attributeName);
-
         if (pathValue.IsUnknown || pathValue.IsNull)
         {
-            return TerraformValidateResult.Empty;
+            return [];
         }
 
-        if (string.IsNullOrWhiteSpace(pathValue.AsString()))
+        if (string.IsNullOrWhiteSpace(pathValue.RequireValue()))
         {
-            return new TerraformValidateResult(
-                [
-                    TerraformPluginDotnet.Diagnostics.TerraformDiagnostic.Error(
-                        "Invalid path",
-                        $"{attributeName} must be a non-empty string.",
-                        TerraformAttributePath.Root(attributeName)),
-                ]);
+            return
+            [
+                TerraformPluginDotnet.Diagnostics.TerraformDiagnostic.Error(
+                    "Invalid path",
+                    $"{attributeName} must be a non-empty string.",
+                    TerraformAttributePath.Root(attributeName)),
+            ];
         }
 
-        return TerraformValidateResult.Empty;
+        return [];
     }
+}
+
+internal sealed class FileManagedResourceModel
+{
+    [TerraformAttribute(Description = "Path to the managed file.")]
+    public TF<string> Path { get; init; }
+
+    [TerraformAttribute(Description = "Desired file content.")]
+    public TF<string> Content { get; init; }
+
+    [TerraformAttribute(Computed = true, Description = "Canonical absolute path.")]
+    public TF<string> AbsolutePath { get; init; }
+
+    [TerraformAttribute(Computed = true, Description = "SHA-256 of the file content.")]
+    public TF<string> Sha256 { get; init; }
+
+    [TerraformAttribute(Computed = true, Description = "Provider-assigned resource identifier.")]
+    public TF<string> Id { get; init; }
+}
+
+internal sealed class FileReadDataSourceModel
+{
+    [TerraformAttribute(Description = "Path to the file to read.")]
+    public TF<string> Path { get; init; }
+
+    [TerraformAttribute(Computed = true, Description = "Current file content.")]
+    public TF<string> Content { get; init; }
+
+    [TerraformAttribute(Computed = true, Description = "Canonical absolute path.")]
+    public TF<string> AbsolutePath { get; init; }
+
+    [TerraformAttribute(Computed = true, Description = "SHA-256 of the file content.")]
+    public TF<string> Sha256 { get; init; }
 }

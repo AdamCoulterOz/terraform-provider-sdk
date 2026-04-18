@@ -2,7 +2,7 @@ using TerraformPluginDotnet.Schema;
 
 namespace TerraformPluginDotnet.Provider;
 
-public interface ITerraformDataSource
+internal interface ITerraformDataSource
 {
     TerraformComponentSchema Schema { get; }
 
@@ -10,7 +10,7 @@ public interface ITerraformDataSource
     ValueTask<TerraformReadResult> ReadAsync(TerraformDataSourceReadRequest request, CancellationToken cancellationToken);
 }
 
-public abstract class TerraformDataSourceBase : ITerraformDataSource
+internal abstract class TerraformDataSourceBase : ITerraformDataSource
 {
     public abstract TerraformComponentSchema Schema { get; }
 

@@ -1,27 +1,29 @@
-using TerraformPluginDotnet.Provider;
-using TerraformPluginDotnet.Schema;
+using TerraformPluginDotnet;
 using TerraformPluginDotnet.Types;
 
 namespace TerraformProviderFile;
 
-internal sealed class FileReadDataSource : TerraformDataSourceBase
+internal sealed class FileReadDataSource : TerraformDataSource<FileReadDataSourceModel, FileProviderState>
 {
-    public override TerraformComponentSchema Schema => FileProviderModel.DataSourceSchema;
+    public override string TypeName => "file_read";
 
-    public override ValueTask<TerraformValidateResult> ValidateConfigAsync(TerraformDataSourceValidateRequest request, CancellationToken cancellationToken) =>
-        ValueTask.FromResult(FileProviderModel.ValidatePathValue(request.Config, "path"));
+    public override ValueTask<IReadOnlyList<TerraformPluginDotnet.Diagnostics.TerraformDiagnostic>> ValidateConfigAsync(FileReadDataSourceModel request, CancellationToken cancellationToken) =>
+        ValueTask.FromResult(FileProviderModel.ValidatePathValue(request.Path, "path"));
 
-    public override ValueTask<TerraformReadResult> ReadAsync(TerraformDataSourceReadRequest request, CancellationToken cancellationToken)
+    public override ValueTask<TerraformModelResult<FileReadDataSourceModel>> ReadAsync(
+        FileReadDataSourceModel request,
+        TerraformDataSourceContext<FileProviderState> context,
+        CancellationToken cancellationToken)
     {
-        var providerState = FileProviderModel.RequireProviderState(request.ProviderState);
-        var path = request.Config.GetAttribute("path").AsString();
+        var providerState = context.ProviderState;
+        var path = request.Path.RequireValue();
         var absolutePath = FileProviderModel.ResolvePath(providerState, path);
 
         if (!File.Exists(absolutePath))
         {
             return ValueTask.FromResult(
-                new TerraformReadResult(
-                    TerraformValue.Null(Schema.Block.ValueType()),
+                new TerraformModelResult<FileReadDataSourceModel>(
+                    null,
                     Diagnostics:
                     [
                         TerraformPluginDotnet.Diagnostics.TerraformDiagnostic.Error(
@@ -31,6 +33,6 @@ internal sealed class FileReadDataSource : TerraformDataSourceBase
         }
 
         var materialized = FileProviderModel.ReadExisting(providerState, path);
-        return ValueTask.FromResult(new TerraformReadResult(FileProviderModel.ToDataSourceValue(materialized)));
+        return ValueTask.FromResult(new TerraformModelResult<FileReadDataSourceModel>(FileProviderModel.ToDataSourceModel(materialized)));
     }
 }

@@ -2,7 +2,7 @@ using TerraformPluginDotnet.Schema;
 
 namespace TerraformPluginDotnet.Provider;
 
-public interface ITerraformProvider
+internal interface ITerraformProvider
 {
     TerraformComponentSchema ProviderSchema { get; }
     TerraformComponentSchema? ProviderMetaSchema { get; }
@@ -13,7 +13,7 @@ public interface ITerraformProvider
     ValueTask<TerraformConfigureResult> ConfigureAsync(TerraformProviderConfigureRequest request, CancellationToken cancellationToken);
 }
 
-public abstract class TerraformProviderBase : ITerraformProvider
+internal abstract class TerraformProviderBase : ITerraformProvider
 {
     public abstract TerraformComponentSchema ProviderSchema { get; }
     public virtual TerraformComponentSchema? ProviderMetaSchema => null;

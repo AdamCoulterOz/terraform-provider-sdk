@@ -112,7 +112,7 @@ internal sealed class ProviderRpcService(
 
         if (request.RawState.Flatmap.Count == 0)
         {
-            response.UpgradedState = TerraformDynamicValueSerializer.EncodeDynamicValue(TerraformValue.Null(stateType), stateType);
+            response.UpgradedState = TerraformDynamicValueSerializer.EncodeDynamicValue(TerraformDynamicValue.Null(stateType), stateType);
             return Task.FromResult(response);
         }
 
@@ -224,7 +224,7 @@ internal sealed class ProviderRpcService(
         {
             var importedResource = new ImportResourceState.Types.ImportedResource
             {
-                TypeName = imported.TypeName,
+                TypeName = request.TypeName,
                 State = TerraformDynamicValueSerializer.EncodeDynamicValue(imported.State, resource.Schema.Block.ValueType()),
                 Private = Google.Protobuf.ByteString.CopyFrom(imported.PrivateState ?? []),
             };

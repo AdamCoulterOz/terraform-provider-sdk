@@ -24,31 +24,31 @@ public sealed class TerraformDynamicValueSerializerTests
                 ["settings"] = nestedType,
             });
 
-        var value = TerraformValue.Object(
+        var value = TerraformDynamicValue.Object(
             valueType,
-            new Dictionary<string, TerraformValue>(StringComparer.Ordinal)
+            new Dictionary<string, TerraformDynamicValue>(StringComparer.Ordinal)
             {
-                ["name"] = TerraformValue.String("widget"),
-                ["count"] = TerraformValue.Number(TerraformNumber.Parse("42")),
-                ["tags"] = TerraformValue.Map(
+                ["name"] = TerraformDynamicValue.String("widget"),
+                ["count"] = TerraformDynamicValue.Number(TerraformNumber.Parse("42")),
+                ["tags"] = TerraformDynamicValue.Map(
                     TerraformType.String,
-                    new Dictionary<string, TerraformValue>(StringComparer.Ordinal)
+                    new Dictionary<string, TerraformDynamicValue>(StringComparer.Ordinal)
                     {
-                        ["env"] = TerraformValue.String("test"),
-                        ["tier"] = TerraformValue.String("backend"),
+                        ["env"] = TerraformDynamicValue.String("test"),
+                        ["tier"] = TerraformDynamicValue.String("backend"),
                     }),
-                ["items"] = TerraformValue.List(
+                ["items"] = TerraformDynamicValue.List(
                     TerraformType.String,
                     [
-                        TerraformValue.String("one"),
-                        TerraformValue.String("two"),
+                        TerraformDynamicValue.String("one"),
+                        TerraformDynamicValue.String("two"),
                     ]),
-                ["settings"] = TerraformValue.Object(
+                ["settings"] = TerraformDynamicValue.Object(
                     nestedType,
-                    new Dictionary<string, TerraformValue>(StringComparer.Ordinal)
+                    new Dictionary<string, TerraformDynamicValue>(StringComparer.Ordinal)
                     {
-                        ["enabled"] = TerraformValue.Bool(true),
-                        ["threshold"] = TerraformValue.Number(TerraformNumber.Parse("3.5")),
+                        ["enabled"] = TerraformDynamicValue.Bool(true),
+                        ["threshold"] = TerraformDynamicValue.Number(TerraformNumber.Parse("3.5")),
                     }),
             });
 
@@ -61,7 +61,7 @@ public sealed class TerraformDynamicValueSerializerTests
     [Fact]
     public void EncodeDecodeMsgPack_PreservesUnknownValue()
     {
-        var value = TerraformValue.Unknown(TerraformType.String);
+        var value = TerraformDynamicValue.Unknown(TerraformType.String);
 
         var encoded = TerraformDynamicValueSerializer.EncodeDynamicValue(value, TerraformType.String);
         var decoded = TerraformDynamicValueSerializer.DecodeDynamicValue(encoded, TerraformType.String);
@@ -73,13 +73,13 @@ public sealed class TerraformDynamicValueSerializerTests
     [Fact]
     public void EncodeDecodeMsgPack_RoundTripsDynamicValue()
     {
-        var encoded = TerraformDynamicValueSerializer.EncodeDynamicValue(TerraformValue.String("hello"), TerraformType.Dynamic);
+        var encoded = TerraformDynamicValueSerializer.EncodeDynamicValue(TerraformDynamicValue.String("hello"), TerraformType.Dynamic);
         var decoded = TerraformDynamicValueSerializer.DecodeDynamicValue(encoded, TerraformType.Dynamic);
 
         Assert.True(decoded.IsKnown);
         Assert.Equal(TerraformType.Dynamic, decoded.Type);
 
-        var innerValue = Assert.IsType<TerraformValue>(decoded.Value);
+        var innerValue = Assert.IsType<TerraformDynamicValue>(decoded.Value);
         Assert.Equal(TerraformType.String, innerValue.Type);
         Assert.Equal("hello", innerValue.AsString());
     }
@@ -106,7 +106,7 @@ public sealed class TerraformDynamicValueSerializerTests
         Assert.True(decoded.GetAttribute("enabled").AsBoolean());
     }
 
-    private static void AssertEquivalent(TerraformValue expected, TerraformValue actual)
+    private static void AssertEquivalent(TerraformDynamicValue expected, TerraformDynamicValue actual)
     {
         Assert.Equal(expected.Type, actual.Type);
         Assert.Equal(expected.State, actual.State);
@@ -127,7 +127,7 @@ public sealed class TerraformDynamicValueSerializerTests
             case TerraformNumber expectedNumber:
                 Assert.Equal(expectedNumber.Raw, actual.AsNumber().Raw);
                 return;
-            case IReadOnlyList<TerraformValue> expectedSequence:
+            case IReadOnlyList<TerraformDynamicValue> expectedSequence:
             {
                 var actualSequence = actual.AsSequence();
                 Assert.Equal(expectedSequence.Count, actualSequence.Count);
@@ -139,7 +139,7 @@ public sealed class TerraformDynamicValueSerializerTests
 
                 return;
             }
-            case IReadOnlyDictionary<string, TerraformValue> expectedObject:
+            case IReadOnlyDictionary<string, TerraformDynamicValue> expectedObject:
             {
                 var actualObject = actual.AsObject();
                 Assert.Equal(expectedObject.Count, actualObject.Count);
@@ -152,9 +152,9 @@ public sealed class TerraformDynamicValueSerializerTests
 
                 return;
             }
-            case TerraformValue expectedInnerValue:
+            case TerraformDynamicValue expectedInnerValue:
             {
-                var actualInnerValue = Assert.IsType<TerraformValue>(actual.Value);
+                var actualInnerValue = Assert.IsType<TerraformDynamicValue>(actual.Value);
                 AssertEquivalent(expectedInnerValue, actualInnerValue);
                 return;
             }
