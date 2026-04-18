@@ -7,5 +7,6 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/TerraformPluginDotnet.E2E/TerraformPluginDotnet.E2E.csproj" />
+    <Project Path="tests/TerraformPluginDotnet.Tests/TerraformPluginDotnet.Tests.csproj" />
   </Folder>
 </Solution>
