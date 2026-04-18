@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/TerraformProviderFile/TerraformProviderFile.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/TerraformPluginDotnet/TerraformPluginDotnet.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TerraformPluginDotnet.E2E/TerraformPluginDotnet.E2E.csproj" />
+  </Folder>
+</Solution>

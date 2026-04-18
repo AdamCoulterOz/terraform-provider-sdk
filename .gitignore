@@ -1,0 +1,6 @@
+.DS_Store
+.idea/
+*.iws
+**/bin/
+**/obj/
+tests/TerraformPluginDotnet.E2E/artifacts/
