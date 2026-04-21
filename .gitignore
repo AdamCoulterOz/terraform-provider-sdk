@@ -3,4 +3,4 @@
 *.iws
 **/bin/
 **/obj/
-tests/TerraformPluginDotnet.E2E/artifacts/
+tests/TerraformPlugin.E2E/artifacts/

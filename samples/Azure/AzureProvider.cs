@@ -1,71 +1,71 @@
-using TerraformPluginDotnet;
+using TerraformPlugin;
+using Azure.ResourceIds;
+using System.Reflection;
 
 namespace Azure;
 
-internal abstract class AzureNode
+internal interface IAzureProvider<TSelf>
+    where TSelf : AzureProvider
 {
-    protected abstract string Segment { get; }
-
-    protected virtual AzureNode? Parent => null;
-
-    public string Name => Parent is null
-        ? TerraformName.ToSnakeCase(Segment)
-        : $"{Parent.Name}_{TerraformName.ToSnakeCase(Segment)}";
+    static abstract TSelf Instance { get; }
 }
 
-internal abstract class AzureProvider(string resourceProviderNamespace) : AzureNode
+internal abstract class AzureProvider
 {
-    public string ResourceProviderNamespace { get; } = resourceProviderNamespace;
+    public abstract string ResourceProviderNamespace { get; }
+    public abstract string Name { get; }
 }
 
-internal abstract class AzureService : AzureNode;
-
-internal abstract class AzureResource<TSelf> : TerraformResource<TSelf, ProviderState>
-    where TSelf : AzureResource<TSelf>, new()
+internal abstract class AzureResource<TSelf, TProvider> : Resource<TSelf, ProviderState>
+    where TSelf : AzureResource<TSelf, TProvider>
+    where TProvider : AzureProvider, IAzureProvider<TProvider>
 {
-    protected abstract AzureNode ParentNode { get; }
+    protected TProvider Provider => TProvider.Instance;
+    protected ResourceTypeNode ResourceType => ResolveResourceType();
 
-    protected abstract string ResourceSegment { get; }
-
-    public sealed override string Name => $"{ParentNode.Name}_{TerraformName.ToSnakeCase(ResourceSegment)}";
-}
-
-internal static class TerraformName
-{
-    public static string ToSnakeCase(string name)
+    public sealed override string Name
     {
-        if (string.IsNullOrEmpty(name))
+        get
         {
-            return name;
+            var resourceName = ResolveResourceName(typeof(TSelf));
+            return string.Equals(resourceName, Provider.Name, StringComparison.Ordinal)
+                ? Provider.Name
+                : $"{Provider.Name}_{resourceName}";
+        }
+    }
+
+    protected string FormatResourceId(params string[] names) => ResourceType.FormatResourceId(names);
+
+    protected bool TryParseResourceId(string resourceId, out string[] names) =>
+        ResourceType.TryParseResourceId(resourceId, out names);
+
+    protected bool TryParseLeafResourceName(string resourceId, out string name)
+    {
+        if (TryParseResourceId(resourceId, out var names) && names.Length > 0)
+        {
+            name = names[^1];
+            return true;
         }
 
-        var builder = new System.Text.StringBuilder(name.Length + 8);
+        name = string.Empty;
+        return false;
+    }
 
-        for (var index = 0; index < name.Length; index++)
+    private static ResourceTypeNode ResolveResourceType()
+    {
+        var property = typeof(TProvider)
+            .GetProperty(typeof(TSelf).Name, BindingFlags.Instance | BindingFlags.Public)
+            ?? throw new InvalidOperationException(
+                $"Azure provider '{typeof(TProvider).Name}' does not declare a ResourceTypeNode property named '{typeof(TSelf).Name}'.");
+
+        if (property.PropertyType != typeof(ResourceTypeNode))
         {
-            var current = name[index];
-
-            if (char.IsUpper(current))
-            {
-                if (index > 0)
-                {
-                    var previous = name[index - 1];
-                    var nextIsLower = index + 1 < name.Length && char.IsLower(name[index + 1]);
-
-                    if (char.IsLower(previous) || char.IsDigit(previous) || (char.IsUpper(previous) && nextIsLower))
-                    {
-                        builder.Append('_');
-                    }
-                }
-
-                builder.Append(char.ToLowerInvariant(current));
-            }
-            else
-            {
-                builder.Append(current);
-            }
+            throw new InvalidOperationException(
+                $"Azure provider property '{typeof(TProvider).Name}.{property.Name}' must be a {nameof(ResourceTypeNode)}.");
         }
 
-        return builder.ToString();
+        return (ResourceTypeNode)(property.GetValue(TProvider.Instance)
+            ?? throw new InvalidOperationException(
+                $"Azure provider property '{typeof(TProvider).Name}.{property.Name}' returned null."));
     }
 }

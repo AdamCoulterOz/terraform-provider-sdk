@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
-using TerraformPluginDotnet.Schema;
-using TerraformPluginDotnet.Types;
+using TerraformPlugin.Types;
 
 namespace File;
 
@@ -60,7 +59,7 @@ internal static class FileProviderModel
         return Convert.ToHexString(bytes).ToLowerInvariant();
     }
 
-    public static IReadOnlyList<TerraformPluginDotnet.Diagnostics.TerraformDiagnostic> ValidatePathValue(TF<string> pathValue, string attributeName)
+    public static IReadOnlyList<TerraformPlugin.Diagnostics.Diagnostic> ValidatePathValue(TF<string> pathValue, string attributeName)
     {
         if (pathValue.IsUnknown || pathValue.IsNull)
         {
@@ -71,10 +70,10 @@ internal static class FileProviderModel
         {
             return
             [
-                TerraformPluginDotnet.Diagnostics.TerraformDiagnostic.Error(
+                TerraformPlugin.Diagnostics.Diagnostic.Error(
                     "Invalid path",
                     $"{attributeName} must be a non-empty string.",
-                    TerraformAttributePath.Root(attributeName)),
+                    AttributePath.Root(attributeName)),
             ];
         }
 

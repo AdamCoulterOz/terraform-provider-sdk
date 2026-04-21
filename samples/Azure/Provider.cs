@@ -1,46 +1,52 @@
 using Azure.Storage.Blobs;
-using TerraformPluginDotnet;
-using TerraformPluginDotnet.Diagnostics;
-using TerraformPluginDotnet.Schema;
-using TerraformPluginDotnet.Types;
+using TerraformPlugin;
+using TerraformPlugin.Diagnostics;
+using TerraformPlugin.Schema;
+using TerraformPlugin.Types;
+using TerraformPlugin.Validation;
 
 namespace Azure;
 
-internal sealed class Provider : TerraformProvider<ProviderConfigModel, ProviderState>
+internal sealed class Provider : Provider<ProviderConfigModel, ProviderState>
 {
     public override string TypeName => "az";
 
-    public override IEnumerable<TerraformResource<ProviderState>> Resources =>
-        [new Storage.Blob.Blob()];
+    public override IEnumerable<Resource<ProviderState>> Resources =>
+        [
+            Resource<Storage.Account>(),
+            Resource<Storage.Blob.Blob>(),
+        ];
 
-    public override IEnumerable<TerraformDataSource<ProviderState>> DataSources => [];
+    public override IEnumerable<DataSource<ProviderState>> DataSources => [];
 
-    public override ValueTask<IReadOnlyList<TerraformDiagnostic>> ValidateConfigAsync(ProviderConfigModel config, CancellationToken cancellationToken)
+    public override ValueTask<IReadOnlyList<Diagnostic>> ValidateConfigAsync(ProviderConfigModel config, CancellationToken cancellationToken)
     {
-        if (config.ConnectionString.IsUnknown || config.ConnectionString.IsNull)
-            return ValueTask.FromResult<IReadOnlyList<TerraformDiagnostic>>([]);
+        var diagnostics = Validator.Validate(config);
+
+        if (diagnostics.Count > 0 || config.ConnectionString.IsUnknown || config.ConnectionString.IsNull)
+            return ValueTask.FromResult(diagnostics);
 
         try
         {
             _ = new BlobServiceClient(config.ConnectionString.RequireValue());
-            return ValueTask.FromResult<IReadOnlyList<TerraformDiagnostic>>([]);
+            return ValueTask.FromResult(diagnostics);
         }
         catch (Exception exception)
         {
-            return ValueTask.FromResult(
-                (IReadOnlyList<TerraformDiagnostic>)
-                [
-                    TerraformDiagnostic.Error(
-                        "Invalid Azure Storage connection string",
-                        $"{exception.GetType().Name}: {exception.Message}",
-                        TerraformAttributePath.Root("connection_string")),
-                ]);
+            return ValueTask.FromResult<IReadOnlyList<Diagnostic>>(
+            [
+                .. diagnostics,
+                Diagnostic.Error(
+                    "Invalid Azure Storage connection string",
+                    $"{exception.GetType().Name}: {exception.Message}",
+                    AttributePath.Root("connection_string")),
+            ]);
         }
     }
 
     public override ValueTask<ProviderState> ConfigureAsync(
         ProviderConfigModel config,
-        TerraformProviderContext context,
+        ProviderContext context,
         CancellationToken cancellationToken) =>
         ValueTask.FromResult(ProviderState.Create(new BlobServiceClient(config.ConnectionString.RequireValue())));
 }
@@ -64,9 +70,7 @@ internal sealed record ProviderState(BlobServiceClient ServiceClient, string Acc
         var dot = host.IndexOf('.');
 
         if (dot > 0)
-        {
             return host[..dot];
-        }
 
         throw new InvalidOperationException($"Could not determine the Azure Storage account name from '{serviceUri}'.");
     }
@@ -74,6 +78,7 @@ internal sealed record ProviderState(BlobServiceClient ServiceClient, string Acc
 
 internal sealed class ProviderConfigModel
 {
-    [TerraformAttribute(Description = "Azure Storage connection string.")]
+    [TFAttribute(Description = "Azure Storage connection string.")]
+    [NotEmpty]
     public TF<string> ConnectionString { get; init; }
 }

@@ -2,12 +2,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\TerraformPlugin\TerraformPlugin.csproj" />
+    <ProjectReference Include="..\..\samples\File\File.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <AssemblyName>terraform-provider-file</AssemblyName>
-    <RootNamespace>File</RootNamespace>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

@@ -1,60 +1,56 @@
-using TerraformPluginDotnet;
-using TerraformPluginDotnet.Diagnostics;
-using TerraformPluginDotnet.Schema;
-using TerraformPluginDotnet.Types;
-using System.Diagnostics.CodeAnalysis;
+using TerraformPlugin;
+using TerraformPlugin.Diagnostics;
+using TerraformPlugin.Schema;
+using TerraformPlugin.Types;
+using TerraformPlugin.Validation;
 
 namespace File;
 
-[method: SetsRequiredMembers]
-internal sealed class FileManagedResource() : TerraformResource<FileManagedResource, FileProviderState>
+[Resource("managed")]
+internal sealed class FileManagedResource : Resource<FileManagedResource, FileProviderState>
 {
-    public override string Name => "managed";
-
-    [TerraformAttribute(Description = "Path to the managed file.")]
+    [TFAttribute(Description = "Path to the managed file.")]
+    [NotEmpty]
     public required TF<string> Path { get; init; }
 
-    [TerraformAttribute(Description = "Desired file content.")]
+    [TFAttribute(Description = "Desired file content.")]
     public required TF<string> Content { get; init; }
 
-    [TerraformAttribute(Computed = true, Description = "Canonical absolute path.")]
+    [TFAttribute(Computed = true, Description = "Canonical absolute path.")]
     public TF<string> AbsolutePath { get; init; }
 
-    [TerraformAttribute(Computed = true, Description = "SHA-256 of the file content.")]
+    [TFAttribute(Computed = true, Description = "SHA-256 of the file content.")]
     public TF<string> Sha256 { get; init; }
 
-    [TerraformAttribute(Computed = true, Description = "Provider-assigned resource identifier.")]
+    [TFAttribute(Computed = true, Description = "Provider-assigned resource identifier.")]
     public TF<string> Id { get; init; }
 
-    public override ValueTask<IReadOnlyList<TerraformDiagnostic>> ValidateConfigAsync(CancellationToken cancellationToken) =>
-        ValueTask.FromResult(FileProviderModel.ValidatePathValue(Path, "path"));
-
-    public override ValueTask<TerraformModelResult<FileManagedResource>> ReadAsync(
-        TerraformResourceContext<FileProviderState> context,
+    public override ValueTask<ModelResult<FileManagedResource>> ReadAsync(
+        ResourceContext<FileProviderState> context,
         CancellationToken cancellationToken)
     {
         if (Path.IsNull || Path.IsUnknown)
-            return ValueTask.FromResult(new TerraformModelResult<FileManagedResource>(null, PrivateState: context.PrivateState));
+            return ValueTask.FromResult(new ModelResult<FileManagedResource>(null, PrivateState: context.PrivateState));
 
         var absolutePath = FileProviderModel.ResolvePath(context.ProviderState, Path.RequireValue());
 
         if (!System.IO.File.Exists(absolutePath))
-            return ValueTask.FromResult(new TerraformModelResult<FileManagedResource>(null, PrivateState: context.PrivateState));
+            return ValueTask.FromResult(new ModelResult<FileManagedResource>(null, PrivateState: context.PrivateState));
 
         return ValueTask.FromResult(
-            new TerraformModelResult<FileManagedResource>(
+            new ModelResult<FileManagedResource>(
                 FileProviderModel.ToResource(FileProviderModel.ReadExisting(context.ProviderState, Path.RequireValue())),
                 PrivateState: context.PrivateState));
     }
 
-    public override ValueTask<TerraformPlanResult<FileManagedResource>> PlanAsync(
+    public override ValueTask<PlanResult<FileManagedResource>> PlanAsync(
         FileManagedResource? priorState,
-        TerraformResourceContext<FileProviderState> context,
+        ResourceContext<FileProviderState> context,
         CancellationToken cancellationToken)
     {
         if (Path.IsUnknown || Content.IsUnknown)
             return ValueTask.FromResult(
-                new TerraformPlanResult<FileManagedResource>(
+                new PlanResult<FileManagedResource>(
                     FileProviderModel.UnknownResourcePlannedState(Path, Content),
                     PlannedPrivateState: context.PriorPrivateState));
 
@@ -62,15 +58,15 @@ internal sealed class FileManagedResource() : TerraformResource<FileManagedResou
         var requiresReplace = GetReplacePathsIfNeeded(context.ProviderState, priorState, materialized.AbsolutePath);
 
         return ValueTask.FromResult(
-            new TerraformPlanResult<FileManagedResource>(
+            new PlanResult<FileManagedResource>(
                 FileProviderModel.ToResource(materialized),
                 PlannedPrivateState: context.PriorPrivateState,
                 RequiresReplace: requiresReplace));
     }
 
-    public override ValueTask<TerraformModelResult<FileManagedResource>> ApplyAsync(
+    public override ValueTask<ModelResult<FileManagedResource>> ApplyAsync(
         FileManagedResource? priorState,
-        TerraformResourceContext<FileProviderState> context,
+        ResourceContext<FileProviderState> context,
         CancellationToken cancellationToken)
     {
         var path = Path.RequireValue();
@@ -85,33 +81,33 @@ internal sealed class FileManagedResource() : TerraformResource<FileManagedResou
 
         var materialized = FileProviderModel.ReadExisting(context.ProviderState, path);
         return ValueTask.FromResult(
-            new TerraformModelResult<FileManagedResource>(
+            new ModelResult<FileManagedResource>(
                 FileProviderModel.ToResource(materialized),
                 PrivateState: context.PlannedPrivateState));
     }
 
-    public override ValueTask<TerraformModelResult<FileManagedResource>> DeleteAsync(
+    public override ValueTask<ModelResult<FileManagedResource>> DeleteAsync(
         FileManagedResource? priorState,
-        TerraformResourceContext<FileProviderState> context,
+        ResourceContext<FileProviderState> context,
         CancellationToken cancellationToken)
     {
         DeletePriorFileIfPresent(context.ProviderState, priorState);
-        return ValueTask.FromResult(new TerraformModelResult<FileManagedResource>(null, PrivateState: context.PlannedPrivateState));
+        return ValueTask.FromResult(new ModelResult<FileManagedResource>(null, PrivateState: context.PlannedPrivateState));
     }
 
-    public override ValueTask<TerraformImportResult<FileManagedResource>> ImportAsync(
+    public override ValueTask<ImportResult<FileManagedResource>> ImportAsync(
         string id,
-        TerraformResourceContext<FileProviderState> context,
+        ResourceContext<FileProviderState> context,
         CancellationToken cancellationToken)
     {
         var absolutePath = FileProviderModel.ResolvePath(context.ProviderState, id);
 
         if (!System.IO.File.Exists(absolutePath))
             return ValueTask.FromResult(
-                new TerraformImportResult<FileManagedResource>(
+                new ImportResult<FileManagedResource>(
                     [],
                     [
-                        TerraformDiagnostic.Error(
+                        Diagnostic.Error(
                             "Import target not found",
                             $"No file exists at '{absolutePath}'."),
                     ]));
@@ -119,7 +115,7 @@ internal sealed class FileManagedResource() : TerraformResource<FileManagedResou
         var materialized = FileProviderModel.ReadExisting(context.ProviderState, id);
 
         return ValueTask.FromResult(
-            new TerraformImportResult<FileManagedResource>(
+            new ImportResult<FileManagedResource>(
                 [
                     FileProviderModel.ToResource(materialized),
                 ]));
@@ -139,7 +135,7 @@ internal sealed class FileManagedResource() : TerraformResource<FileManagedResou
         return ValueTask.FromResult<FileManagedResource?>(FileProviderModel.ToResource(FileProviderModel.ReadExisting(providerState, path.RequireValue())));
     }
 
-    private static IReadOnlyList<TerraformAttributePath>? GetReplacePathsIfNeeded(
+    private static IReadOnlyList<AttributePath>? GetReplacePathsIfNeeded(
         FileProviderState providerState,
         FileManagedResource? priorState,
         string nextAbsolutePath)
@@ -151,7 +147,7 @@ internal sealed class FileManagedResource() : TerraformResource<FileManagedResou
 
         return string.Equals(priorAbsolutePath, nextAbsolutePath, StringComparison.Ordinal)
             ? null
-            : [TerraformAttributePath.Root("path")];
+            : [AttributePath.Root("path")];
     }
 
     private static void DeletePriorFileIfPresent(FileProviderState providerState, FileManagedResource? priorState)

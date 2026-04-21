@@ -9,11 +9,11 @@ Provider authors work with typed classes, conventions, optional override attribu
 The main authoring surface is now self-typed: the resource class is the schema source, the bound Terraform object, and the behavior implementation. Public properties define the Terraform shape. PascalCase member names become `snake_case`. Writable members become inputs, getter-only or explicitly computed members become outputs, and `[DataSourceQuery]` methods generate Terraform data sources from method parameters plus the resource's output shape.
 
 ```csharp
-using TerraformPluginDotnet;
-using TerraformPluginDotnet.Diagnostics;
-using TerraformPluginDotnet.Hosting;
-using TerraformPluginDotnet.Schema;
-using TerraformPluginDotnet.Types;
+using TerraformPlugin;
+using TerraformPlugin.Diagnostics;
+using TerraformPlugin.Hosting;
+using TerraformPlugin.Schema;
+using TerraformPlugin.Types;
 
 return await TerraformProviderHost.RunAsync(new ExampleProvider(), args);
 
@@ -94,7 +94,7 @@ internal sealed class Widget : TerraformResource<Widget, ExampleProviderState>
 
 ## Layout
 
-- `src/TerraformPluginDotnet`
+- `src/TerraformPlugin`
   - Runtime SDK surface.
 - `proto/`
   - Vendored protobuf definitions used to generate the gRPC server bindings.
@@ -103,7 +103,7 @@ internal sealed class Widget : TerraformResource<Widget, ExampleProviderState>
 - `samples/Azure`
   - A working provider that manages Azure Blob Storage content through `Azure.Storage.Blobs`.
   - The root Terraform provider type is `az`, while Azure Resource Provider nodes such as `Storage : AzureProvider("Microsoft.Storage")` contribute composed child names like `az_storage_blob`.
-- `tests/TerraformPluginDotnet.E2E`
+- `tests/TerraformPlugin.E2E`
   - Publishes the sample providers and runs them through the real Terraform CLI.
 
 ## Design Goals
@@ -148,7 +148,7 @@ Not implemented yet:
 From the repository root:
 
 ```bash
-dotnet run --project tests/TerraformPluginDotnet.E2E/TerraformPluginDotnet.E2E.csproj
+dotnet run --project tests/TerraformPlugin.E2E/TerraformPlugin.E2E.csproj
 ```
 
 That command publishes `samples/File`, runs Terraform with a development override, applies configuration, verifies convergence, and destroys the created resource.

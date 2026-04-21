@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/samples/">
+    <Project Path="samples/Azure/Azure.csproj" />
+    <Project Path="samples/File/File.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/TerraformPlugin/TerraformPlugin.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TerraformPlugin.E2E/TerraformPlugin.E2E.csproj" />
+    <Project Path="tests/TerraformPlugin.Tests/TerraformPlugin.Tests.csproj" />
+  </Folder>
+</Solution>

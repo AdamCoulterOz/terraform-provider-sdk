@@ -1,40 +1,21 @@
-using TerraformPluginDotnet;
-using TerraformPluginDotnet.Diagnostics;
-using TerraformPluginDotnet.Schema;
-using TerraformPluginDotnet.Types;
+using TerraformPlugin;
+using TerraformPlugin.Schema;
+using TerraformPlugin.Types;
+using TerraformPlugin.Validation;
 
 namespace File;
 
-internal sealed class FileProvider : TerraformProvider<FileProviderConfigModel, FileProviderState>
+internal sealed class FileProvider : Provider<FileProviderConfigModel, FileProviderState>
 {
     public override string TypeName => "file";
 
-    public override IEnumerable<TerraformResource<FileProviderState>> Resources =>
-        [new FileManagedResource()];
+    public override IEnumerable<Resource<FileProviderState>> Resources =>
+        [Resource<FileManagedResource>()];
 
-    public override IEnumerable<TerraformDataSource<FileProviderState>> DataSources =>
+    public override IEnumerable<DataSource<FileProviderState>> DataSources =>
         [];
 
-    public override ValueTask<IReadOnlyList<TerraformDiagnostic>> ValidateConfigAsync(FileProviderConfigModel request, CancellationToken cancellationToken)
-    {
-        var baseDirectory = request.BaseDirectory.GetValueOrDefault();
-
-        if (baseDirectory is not null && string.IsNullOrWhiteSpace(baseDirectory))
-        {
-            return ValueTask.FromResult(
-                (IReadOnlyList<TerraformDiagnostic>)
-                [
-                    TerraformDiagnostic.Error(
-                        "Invalid base directory",
-                        "base_directory must be either omitted or a non-empty path.",
-                        TerraformAttributePath.Root("base_directory")),
-                ]);
-        }
-
-        return ValueTask.FromResult<IReadOnlyList<TerraformDiagnostic>>([]);
-    }
-
-    public override ValueTask<FileProviderState> ConfigureAsync(FileProviderConfigModel request, TerraformProviderContext context, CancellationToken cancellationToken)
+    public override ValueTask<FileProviderState> ConfigureAsync(FileProviderConfigModel request, ProviderContext context, CancellationToken cancellationToken)
     {
         var configuredBaseDirectory = request.BaseDirectory.GetValueOrDefault();
         var baseDirectory = string.IsNullOrWhiteSpace(configuredBaseDirectory)
@@ -49,6 +30,7 @@ internal sealed class FileProvider : TerraformProvider<FileProviderConfigModel, 
 
 internal sealed class FileProviderConfigModel
 {
-    [TerraformAttribute(Optional = true, Description = "Base directory for relative file paths.")]
+    [TFAttribute(Optional = true, Description = "Base directory for relative file paths.")]
+    [NotEmpty]
     public TF<string> BaseDirectory { get; init; }
 }
