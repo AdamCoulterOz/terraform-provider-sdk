@@ -1,47 +1,84 @@
+using System.Reflection;
 using TerraformPluginDotnet.Diagnostics;
 using TerraformPluginDotnet.Provider;
 using TerraformPluginDotnet.Schema;
 
 namespace TerraformPluginDotnet;
 
-public abstract class TerraformResource<TProviderState>
+public interface ITerraformResource<TSelf, TProviderState>
+    where TSelf : ITerraformResource<TSelf, TProviderState>, new()
 {
-    public abstract string TypeName { get; }
+    ValueTask<IReadOnlyList<TerraformDiagnostic>> ValidateConfigAsync(CancellationToken cancellationToken);
 
-    internal abstract ITerraformResource ToInternalResource();
+    ValueTask<TerraformModelResult<TSelf>> ReadAsync(
+        TerraformResourceContext<TProviderState> context,
+        CancellationToken cancellationToken);
+
+    ValueTask<TerraformPlanResult<TSelf>> PlanAsync(
+        TSelf? priorState,
+        TerraformResourceContext<TProviderState> context,
+        CancellationToken cancellationToken);
+
+    ValueTask<TerraformModelResult<TSelf>> ApplyAsync(
+        TSelf? priorState,
+        TerraformResourceContext<TProviderState> context,
+        CancellationToken cancellationToken);
+
+    ValueTask<TerraformModelResult<TSelf>> DeleteAsync(
+        TSelf? priorState,
+        TerraformResourceContext<TProviderState> context,
+        CancellationToken cancellationToken);
+
+    ValueTask<TerraformImportResult<TSelf>> ImportAsync(
+        string id,
+        TerraformResourceContext<TProviderState> context,
+        CancellationToken cancellationToken);
 }
 
-public abstract class TerraformResource<TModel, TProviderState> : TerraformResource<TProviderState>
-    where TModel : new()
+public abstract class TerraformResource<TProviderState>
 {
-    public TerraformComponentSchema Schema { get; } = TerraformDeclarativeSchema.For<TModel>();
+    public abstract string Name { get; }
 
-    public virtual ValueTask<IReadOnlyList<TerraformDiagnostic>> ValidateConfigAsync(TModel config, CancellationToken cancellationToken) =>
+    internal abstract ITerraformResource ToInternalResource();
+
+    internal virtual IEnumerable<(string Name, ITerraformDataSource DataSource)> ToGeneratedDataSources() =>
+        [];
+}
+
+public abstract class TerraformResource<TSelf, TProviderState> : TerraformResource<TProviderState>, ITerraformResource<TSelf, TProviderState>
+    where TSelf : TerraformResource<TSelf, TProviderState>, new()
+{
+    public TerraformComponentSchema Schema { get; } = TerraformDeclarativeSchema.For<TSelf>();
+
+    public virtual ValueTask<IReadOnlyList<TerraformDiagnostic>> ValidateConfigAsync(CancellationToken cancellationToken) =>
         ValueTask.FromResult<IReadOnlyList<TerraformDiagnostic>>([]);
 
-    public abstract ValueTask<TerraformModelResult<TModel>> ReadAsync(
-        TModel? currentState,
+    public abstract ValueTask<TerraformModelResult<TSelf>> ReadAsync(
         TerraformResourceContext<TProviderState> context,
         CancellationToken cancellationToken);
 
-    public abstract ValueTask<TerraformPlanResult<TModel>> PlanAsync(
-        TModel? priorState,
-        TModel? proposedState,
+    public abstract ValueTask<TerraformPlanResult<TSelf>> PlanAsync(
+        TSelf? priorState,
         TerraformResourceContext<TProviderState> context,
         CancellationToken cancellationToken);
 
-    public abstract ValueTask<TerraformModelResult<TModel>> ApplyAsync(
-        TModel? priorState,
-        TModel? plannedState,
+    public abstract ValueTask<TerraformModelResult<TSelf>> ApplyAsync(
+        TSelf? priorState,
         TerraformResourceContext<TProviderState> context,
         CancellationToken cancellationToken);
 
-    public virtual ValueTask<TerraformImportResult<TModel>> ImportAsync(
+    public virtual ValueTask<TerraformModelResult<TSelf>> DeleteAsync(
+        TSelf? priorState,
+        TerraformResourceContext<TProviderState> context,
+        CancellationToken cancellationToken) =>
+        ValueTask.FromResult(new TerraformModelResult<TSelf>(null));
+
+    public virtual ValueTask<TerraformImportResult<TSelf>> ImportAsync(
         string id,
         TerraformResourceContext<TProviderState> context,
         CancellationToken cancellationToken) =>
         ValueTask.FromResult(
-            new TerraformImportResult<TModel>(
+            new TerraformImportResult<TSelf>(
                 [],
                 [
                     TerraformDiagnostic.Error(
@@ -49,5 +86,22 @@ public abstract class TerraformResource<TModel, TProviderState> : TerraformResou
                         "This resource does not implement import support."),
                 ]));
 
-    internal override ITerraformResource ToInternalResource() => new TypedResourceAdapter<TModel, TProviderState>(this);
+    internal override ITerraformResource ToInternalResource() => new TypedResourceAdapter<TSelf, TProviderState>(this);
+
+    internal override IEnumerable<(string Name, ITerraformDataSource DataSource)> ToGeneratedDataSources()
+    {
+        foreach (var method in typeof(TSelf).GetMethods(BindingFlags.Public | BindingFlags.Static))
+        {
+            var attribute = method.GetCustomAttribute<DataSourceQueryAttribute>(inherit: true);
+
+            if (attribute is null)
+            {
+                continue;
+            }
+
+            yield return (
+                string.IsNullOrWhiteSpace(attribute.Name) ? Name : attribute.Name!,
+                new ReflectedQueryDataSource<TSelf, TProviderState>(method, attribute));
+        }
+    }
 }

@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/samples/">
-    <Project Path="samples/TerraformProviderFile/TerraformProviderFile.csproj" />
+    <Project Path="samples/Azure/Azure.csproj" />
+    <Project Path="samples/File/File.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/TerraformPluginDotnet/TerraformPluginDotnet.csproj" />

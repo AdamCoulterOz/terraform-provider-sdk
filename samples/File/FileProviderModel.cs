@@ -3,7 +3,7 @@ using System.Text;
 using TerraformPluginDotnet.Schema;
 using TerraformPluginDotnet.Types;
 
-namespace TerraformProviderFile;
+namespace File;
 
 internal sealed record FileProviderState(string BaseDirectory);
 
@@ -15,7 +15,7 @@ internal sealed record FileMaterializedState(
 
 internal static class FileProviderModel
 {
-    public static FileManagedResourceModel ToResourceModel(FileMaterializedState state) =>
+    public static FileManagedResource ToResource(FileMaterializedState state) =>
         new()
         {
             Path = TF<string>.Known(state.Path),
@@ -25,16 +25,7 @@ internal static class FileProviderModel
             Id = TF<string>.Known(state.AbsolutePath),
         };
 
-    public static FileReadDataSourceModel ToDataSourceModel(FileMaterializedState state) =>
-        new()
-        {
-            Path = TF<string>.Known(state.Path),
-            Content = TF<string>.Known(state.Content),
-            AbsolutePath = TF<string>.Known(state.AbsolutePath),
-            Sha256 = TF<string>.Known(state.Sha256),
-        };
-
-    public static FileManagedResourceModel UnknownResourcePlannedState(TF<string> pathValue, TF<string> contentValue) =>
+    public static FileManagedResource UnknownResourcePlannedState(TF<string> pathValue, TF<string> contentValue) =>
         new()
         {
             Path = pathValue,
@@ -54,7 +45,7 @@ internal static class FileProviderModel
     public static FileMaterializedState ReadExisting(FileProviderState providerState, string path)
     {
         var absolutePath = ResolvePath(providerState, path);
-        var content = File.ReadAllText(absolutePath);
+        var content = System.IO.File.ReadAllText(absolutePath);
         return new FileMaterializedState(path, absolutePath, content, ComputeSha256(content));
     }
 
@@ -89,37 +80,4 @@ internal static class FileProviderModel
 
         return [];
     }
-}
-
-internal sealed class FileManagedResourceModel
-{
-    [TerraformAttribute(Description = "Path to the managed file.")]
-    public TF<string> Path { get; init; }
-
-    [TerraformAttribute(Description = "Desired file content.")]
-    public TF<string> Content { get; init; }
-
-    [TerraformAttribute(Computed = true, Description = "Canonical absolute path.")]
-    public TF<string> AbsolutePath { get; init; }
-
-    [TerraformAttribute(Computed = true, Description = "SHA-256 of the file content.")]
-    public TF<string> Sha256 { get; init; }
-
-    [TerraformAttribute(Computed = true, Description = "Provider-assigned resource identifier.")]
-    public TF<string> Id { get; init; }
-}
-
-internal sealed class FileReadDataSourceModel
-{
-    [TerraformAttribute(Description = "Path to the file to read.")]
-    public TF<string> Path { get; init; }
-
-    [TerraformAttribute(Computed = true, Description = "Current file content.")]
-    public TF<string> Content { get; init; }
-
-    [TerraformAttribute(Computed = true, Description = "Canonical absolute path.")]
-    public TF<string> AbsolutePath { get; init; }
-
-    [TerraformAttribute(Computed = true, Description = "SHA-256 of the file content.")]
-    public TF<string> Sha256 { get; init; }
 }

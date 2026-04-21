@@ -7,6 +7,10 @@ namespace TerraformPluginDotnet;
 public abstract class TerraformProvider<TConfig, TProviderState>
     where TConfig : new()
 {
+    public abstract string TypeName { get; }
+
+    public virtual string ComponentTypeNamePrefix => TypeName;
+
     public TerraformComponentSchema ProviderSchema { get; } = TerraformDeclarativeSchema.For<TConfig>();
 
     public virtual TerraformComponentSchema? ProviderMetaSchema => null;

@@ -14,7 +14,11 @@ internal static class TerraformModelBinder
 
     public static TerraformDynamicValue Unbind<T>(T model) => Unbind(typeof(T), model);
 
-    private static object? Bind(Type targetType, TerraformDynamicValue value)
+    internal static object? Bind(Type targetType, TerraformDynamicValue value) => BindCore(targetType, value);
+
+    internal static TerraformDynamicValue Unbind(Type targetType, object? model) => UnbindCore(targetType, model);
+
+    private static object? BindCore(Type targetType, TerraformDynamicValue value)
     {
         Type wrappedType;
 
@@ -75,7 +79,7 @@ internal static class TerraformModelBinder
         return BindObject(nonNullableType, value);
     }
 
-    private static TerraformDynamicValue Unbind(Type targetType, object? model)
+    private static TerraformDynamicValue UnbindCore(Type targetType, object? model)
     {
         if (IsNullableTerraformValueOfT(targetType, out var wrappedType))
         {
@@ -131,7 +135,7 @@ internal static class TerraformModelBinder
 
     private static object BindWrappedValue(Type wrappedType, TerraformDynamicValue value)
     {
-        var genericType = typeof(Types.TF<>).MakeGenericType(wrappedType);
+        var genericType = typeof(TF<>).MakeGenericType(wrappedType);
         var methodName = value.State switch
         {
             TerraformValueState.Known => nameof(Types.TF<object>.Known),
@@ -142,7 +146,7 @@ internal static class TerraformModelBinder
 
         if (value.IsKnown)
         {
-            var innerValue = Bind(wrappedType, value);
+            var innerValue = BindCore(wrappedType, value);
             return genericType.GetMethod(methodName, BindingFlags.Public | BindingFlags.Static)!.Invoke(null, [innerValue])!;
         }
 
@@ -173,7 +177,7 @@ internal static class TerraformModelBinder
         {
             var memberName = TerraformModelConventions.GetSchemaMemberName(member);
             var memberValue = value.GetAttribute(memberName);
-            var boundValue = Bind(TerraformModelConventions.GetMemberType(member), memberValue);
+            var boundValue = BindCore(TerraformModelConventions.GetMemberType(member), memberValue);
             SetMemberValue(instance, member, boundValue);
         }
 
@@ -188,7 +192,7 @@ internal static class TerraformModelBinder
         {
             var memberName = TerraformModelConventions.GetSchemaMemberName(member);
             var memberValue = GetMemberValue(model, member);
-            attributes[memberName] = Unbind(TerraformModelConventions.GetMemberType(member), memberValue);
+            attributes[memberName] = UnbindCore(TerraformModelConventions.GetMemberType(member), memberValue);
         }
 
         return TerraformDynamicValue.Object(TerraformDeclarativeSchema.For(targetType).Block.ValueType(), attributes);
@@ -196,7 +200,7 @@ internal static class TerraformModelBinder
 
     private static object BindEnumerable(Type targetType, Type elementType, TerraformDynamicValue value)
     {
-        var items = value.AsSequence().Select(item => Bind(elementType, item)).ToArray();
+        var items = value.AsSequence().Select(item => BindCore(elementType, item)).ToArray();
 
         if (targetType.IsArray)
         {
@@ -227,7 +231,7 @@ internal static class TerraformModelBinder
 
         foreach (var item in value.AsSequence())
         {
-            addMethod.Invoke(set, [Bind(elementType, item)]);
+            addMethod.Invoke(set, [BindCore(elementType, item)]);
         }
 
         return set;
@@ -239,7 +243,7 @@ internal static class TerraformModelBinder
 
         foreach (var pair in value.AsObject())
         {
-            dictionary[pair.Key] = Bind(valueType, pair.Value);
+            dictionary[pair.Key] = BindCore(valueType, pair.Value);
         }
 
         return dictionary;
@@ -247,13 +251,13 @@ internal static class TerraformModelBinder
 
     private static TerraformDynamicValue UnbindEnumerable(Type targetType, Type elementType, object model)
     {
-        var values = ((IEnumerable)model).Cast<object?>().Select(item => Unbind(elementType, item)).ToArray();
+        var values = ((IEnumerable)model).Cast<object?>().Select(item => UnbindCore(elementType, item)).ToArray();
         return TerraformDynamicValue.List(InferTerraformType(elementType), values);
     }
 
     private static TerraformDynamicValue UnbindSet(Type targetType, Type elementType, object model)
     {
-        var values = ((IEnumerable)model).Cast<object?>().Select(item => Unbind(elementType, item)).ToArray();
+        var values = ((IEnumerable)model).Cast<object?>().Select(item => UnbindCore(elementType, item)).ToArray();
         return TerraformDynamicValue.Set(InferTerraformType(elementType), values);
     }
 
@@ -263,13 +267,13 @@ internal static class TerraformModelBinder
 
         foreach (DictionaryEntry entry in (IDictionary)model)
         {
-            values[(string)entry.Key] = Unbind(valueType, entry.Value);
+            values[(string)entry.Key] = UnbindCore(valueType, entry.Value);
         }
 
         return TerraformDynamicValue.Map(InferTerraformType(valueType), values);
     }
 
-    private static TerraformType InferTerraformType(Type type)
+    internal static TerraformType InferTerraformType(Type type)
     {
         if (TerraformModelConventions.TryGetTerraformValueType(type, out var wrappedType))
         {
@@ -352,8 +356,20 @@ internal static class TerraformModelBinder
         switch (member)
         {
             case PropertyInfo property:
-                property.SetValue(instance, value);
-                return;
+                if (property.SetMethod is not null)
+                {
+                    property.SetValue(instance, value);
+                    return;
+                }
+
+                if (TerraformModelConventions.TryGetBackingField(property, out var backingField))
+                {
+                    backingField.SetValue(instance, value);
+                    return;
+                }
+
+                throw new InvalidOperationException(
+                    $"Property '{property.DeclaringType?.Name}.{property.Name}' is not writable or bindable.");
             case FieldInfo field:
                 field.SetValue(instance, value);
                 return;

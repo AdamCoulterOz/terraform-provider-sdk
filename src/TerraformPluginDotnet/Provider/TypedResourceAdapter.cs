@@ -3,93 +3,148 @@ using TerraformPluginDotnet.Types;
 
 namespace TerraformPluginDotnet.Provider;
 
-internal sealed class TypedResourceAdapter<TModel, TProviderState>(TerraformResource<TModel, TProviderState> resource) : ITerraformResource
-    where TModel : new()
+internal sealed class TypedResourceAdapter<TResource, TProviderState>(TerraformResource<TResource, TProviderState> resource) : ITerraformResource
+    where TResource : TerraformResource<TResource, TProviderState>, new()
 {
     public TerraformComponentSchema Schema => resource.Schema;
 
     public async ValueTask<TerraformValidateResult> ValidateConfigAsync(TerraformResourceValidateRequest request, CancellationToken cancellationToken)
     {
-        var config = TerraformModelBinder.Bind<TModel>(request.Config);
-        var diagnostics = await resource.ValidateConfigAsync(config, cancellationToken).ConfigureAwait(false);
-        return new TerraformValidateResult(diagnostics);
+        try
+        {
+            var config = TerraformModelBinder.Bind<TResource>(request.Config);
+            var diagnostics = await config.ValidateConfigAsync(cancellationToken).ConfigureAwait(false);
+            return new TerraformValidateResult(diagnostics);
+        }
+        catch (Exception exception) when (!TerraformRuntimeDiagnostics.ShouldRethrow(exception))
+        {
+            return new TerraformValidateResult(
+                TerraformRuntimeDiagnostics.FromException("Resource configuration validation failed", exception));
+        }
     }
 
     public async ValueTask<TerraformReadResult> ReadAsync(TerraformResourceReadRequest request, CancellationToken cancellationToken)
     {
-        var currentState = request.CurrentState.IsNull
-            ? default
-            : TerraformModelBinder.Bind<TModel>(request.CurrentState);
+        try
+        {
+            var currentState = request.CurrentState.IsNull
+                ? default
+                : TerraformModelBinder.Bind<TResource>(request.CurrentState);
 
-        var result = await resource.ReadAsync(
-            currentState,
-            new TerraformResourceContext<TProviderState>(RequireProviderState(request.ProviderState)),
-            cancellationToken).ConfigureAwait(false);
+            if (currentState is null)
+            {
+                return new TerraformReadResult(TerraformDynamicValue.Null(Schema.Block.ValueType()), PrivateState: request.PrivateState);
+            }
 
-        return new TerraformReadResult(
-            result.Model is null
-                ? TerraformDynamicValue.Null(Schema.Block.ValueType())
-                : TerraformModelBinder.Unbind(result.Model),
-            Diagnostics: result.Diagnostics);
+            var result = await currentState.ReadAsync(
+                new TerraformResourceContext<TProviderState>(
+                    RequireProviderState(request.ProviderState),
+                    PrivateState: request.PrivateState),
+                cancellationToken).ConfigureAwait(false);
+
+            return new TerraformReadResult(
+                result.Model is null
+                    ? TerraformDynamicValue.Null(Schema.Block.ValueType())
+                    : TerraformModelBinder.Unbind(result.Model),
+                PrivateState: result.PrivateState,
+                Diagnostics: result.Diagnostics);
+        }
+        catch (Exception exception) when (!TerraformRuntimeDiagnostics.ShouldRethrow(exception))
+        {
+            return new TerraformReadResult(
+                TerraformDynamicValue.Null(Schema.Block.ValueType()),
+                Diagnostics: TerraformRuntimeDiagnostics.FromException("Resource read failed", exception));
+        }
     }
 
     public async ValueTask<TerraformPlanResult> PlanAsync(TerraformResourcePlanRequest request, CancellationToken cancellationToken)
     {
-        var priorState = request.PriorState.IsNull
-            ? default
-            : TerraformModelBinder.Bind<TModel>(request.PriorState);
-        var proposedState = request.ProposedNewState.IsNull
-            ? default
-            : TerraformModelBinder.Bind<TModel>(request.ProposedNewState);
+        try
+        {
+            var priorState = request.PriorState.IsNull
+                ? default
+                : TerraformModelBinder.Bind<TResource>(request.PriorState);
+            var proposedState = request.ProposedNewState.IsNull
+                ? default
+                : TerraformModelBinder.Bind<TResource>(request.ProposedNewState);
 
-        var result = await resource.PlanAsync(
-            priorState,
-            proposedState,
-            new TerraformResourceContext<TProviderState>(RequireProviderState(request.ProviderState)),
-            cancellationToken).ConfigureAwait(false);
+            var planTarget = proposedState ?? resource;
 
-        return new TerraformPlanResult(
-            result.PlannedState is null
-                ? TerraformDynamicValue.Null(Schema.Block.ValueType())
-                : TerraformModelBinder.Unbind(result.PlannedState),
-            RequiresReplace: result.RequiresReplace,
-            Diagnostics: result.Diagnostics);
+            var result = await planTarget.PlanAsync(
+                priorState,
+                new TerraformResourceContext<TProviderState>(
+                    RequireProviderState(request.ProviderState),
+                    PriorPrivateState: request.PriorPrivateState),
+                cancellationToken).ConfigureAwait(false);
+
+            return new TerraformPlanResult(
+                result.PlannedState is null
+                    ? TerraformDynamicValue.Null(Schema.Block.ValueType())
+                    : TerraformModelBinder.Unbind(result.PlannedState),
+                PlannedPrivateState: result.PlannedPrivateState,
+                RequiresReplace: result.RequiresReplace,
+                Diagnostics: result.Diagnostics);
+        }
+        catch (Exception exception) when (!TerraformRuntimeDiagnostics.ShouldRethrow(exception))
+        {
+            return new TerraformPlanResult(
+                TerraformDynamicValue.Null(Schema.Block.ValueType()),
+                Diagnostics: TerraformRuntimeDiagnostics.FromException("Resource planning failed", exception));
+        }
     }
 
     public async ValueTask<TerraformApplyResult> ApplyAsync(TerraformResourceApplyRequest request, CancellationToken cancellationToken)
     {
-        var priorState = request.PriorState.IsNull
-            ? default
-            : TerraformModelBinder.Bind<TModel>(request.PriorState);
-        var plannedState = request.PlannedState.IsNull
-            ? default
-            : TerraformModelBinder.Bind<TModel>(request.PlannedState);
+        try
+        {
+            var priorState = request.PriorState.IsNull
+                ? default
+                : TerraformModelBinder.Bind<TResource>(request.PriorState);
+            var plannedState = request.PlannedState.IsNull
+                ? default
+                : TerraformModelBinder.Bind<TResource>(request.PlannedState);
+            var context = new TerraformResourceContext<TProviderState>(
+                RequireProviderState(request.ProviderState),
+                PlannedPrivateState: request.PlannedPrivateState);
 
-        var result = await resource.ApplyAsync(
-            priorState,
-            plannedState,
-            new TerraformResourceContext<TProviderState>(RequireProviderState(request.ProviderState)),
-            cancellationToken).ConfigureAwait(false);
+            var result = plannedState is null
+                ? await resource.DeleteAsync(priorState, context, cancellationToken).ConfigureAwait(false)
+                : await plannedState.ApplyAsync(priorState, context, cancellationToken).ConfigureAwait(false);
 
-        return new TerraformApplyResult(
-            result.Model is null
-                ? TerraformDynamicValue.Null(Schema.Block.ValueType())
-                : TerraformModelBinder.Unbind(result.Model),
-            Diagnostics: result.Diagnostics);
+            return new TerraformApplyResult(
+                result.Model is null
+                    ? TerraformDynamicValue.Null(Schema.Block.ValueType())
+                    : TerraformModelBinder.Unbind(result.Model),
+                PrivateState: result.PrivateState,
+                Diagnostics: result.Diagnostics);
+        }
+        catch (Exception exception) when (!TerraformRuntimeDiagnostics.ShouldRethrow(exception))
+        {
+            return new TerraformApplyResult(
+                TerraformDynamicValue.Null(Schema.Block.ValueType()),
+                Diagnostics: TerraformRuntimeDiagnostics.FromException("Resource apply failed", exception));
+        }
     }
 
     public async ValueTask<TerraformImportResult> ImportAsync(TerraformResourceImportRequest request, CancellationToken cancellationToken)
     {
-        var result = await resource.ImportAsync(
-            request.Id,
-            new TerraformResourceContext<TProviderState>(RequireProviderState(request.ProviderState)),
-            cancellationToken).ConfigureAwait(false);
+        try
+        {
+            var result = await resource.ImportAsync(
+                request.Id,
+                new TerraformResourceContext<TProviderState>(RequireProviderState(request.ProviderState)),
+                cancellationToken).ConfigureAwait(false);
 
-        return new TerraformImportResult(
-            result.Resources.Select(
-                _ => new TerraformImportResource(
-                    TerraformModelBinder.Unbind(_))).ToArray(),
-            result.Diagnostics);
+            return new TerraformImportResult(
+                result.Resources.Select(static resourceModel => new TerraformImportResource(TerraformModelBinder.Unbind(resourceModel))).ToArray(),
+                result.Diagnostics);
+        }
+        catch (Exception exception) when (!TerraformRuntimeDiagnostics.ShouldRethrow(exception))
+        {
+            return new TerraformImportResult(
+                [],
+                TerraformRuntimeDiagnostics.FromException("Resource import failed", exception));
+        }
     }
 
     private static TProviderState RequireProviderState(object? providerState) =>

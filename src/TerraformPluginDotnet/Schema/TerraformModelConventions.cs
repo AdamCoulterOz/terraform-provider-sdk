@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using TerraformPluginDotnet.Types;
 
 namespace TerraformPluginDotnet.Schema;
@@ -7,7 +8,7 @@ internal static class TerraformModelConventions
 {
     public static IEnumerable<MemberInfo> GetIncludedMembers(Type modelType) =>
         modelType
-            .GetMembers(BindingFlags.Instance | BindingFlags.Public)
+            .GetMembers(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
             .Where(static member => member.MemberType is MemberTypes.Property or MemberTypes.Field)
             .Where(ShouldIncludeMember)
             .OrderBy(GetSchemaMemberName, StringComparer.Ordinal);
@@ -77,14 +78,41 @@ internal static class TerraformModelConventions
         return false;
     }
 
+    public static bool IsInputMember(MemberInfo member)
+    {
+        if (member.GetCustomAttribute<TerraformAttributeAttribute>(inherit: true) is { Computed: true })
+        {
+            return false;
+        }
+
+        return member switch
+        {
+            PropertyInfo property => property.SetMethod is not null || TryGetBackingField(property, out _),
+            FieldInfo field => !field.IsInitOnly,
+            _ => false,
+        };
+    }
+
+    public static bool IsRequiredMember(MemberInfo member) =>
+        member.GetCustomAttribute<RequiredMemberAttribute>(inherit: true) is not null;
+
+    public static bool TryGetBackingField(PropertyInfo property, out FieldInfo field)
+    {
+        field = property.DeclaringType?.GetField(
+            $"<{property.Name}>k__BackingField",
+            BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+        return field is not null;
+    }
+
     private static bool ShouldIncludeMember(MemberInfo member) =>
         member.GetCustomAttribute<TerraformAttributeAttribute>(inherit: true) is not null ||
         member.GetCustomAttribute<TerraformNestedBlockAttribute>(inherit: true) is not null ||
         member switch
         {
             PropertyInfo property => property.GetMethod?.IsPublic == true &&
-                                     property.SetMethod?.IsPublic == true &&
-                                     property.GetIndexParameters().Length == 0,
+                                     property.GetIndexParameters().Length == 0 &&
+                                     (property.SetMethod?.IsPublic == true || TryGetBackingField(property, out _)),
             FieldInfo field => !field.IsInitOnly,
             _ => false,
         };

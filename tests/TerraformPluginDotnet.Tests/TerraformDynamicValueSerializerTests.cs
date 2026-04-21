@@ -128,36 +128,34 @@ public sealed class TerraformDynamicValueSerializerTests
                 Assert.Equal(expectedNumber.Raw, actual.AsNumber().Raw);
                 return;
             case IReadOnlyList<TerraformDynamicValue> expectedSequence:
-            {
-                var actualSequence = actual.AsSequence();
-                Assert.Equal(expectedSequence.Count, actualSequence.Count);
-
-                for (var index = 0; index < expectedSequence.Count; index++)
                 {
-                    AssertEquivalent(expectedSequence[index], actualSequence[index]);
-                }
+                    var actualSequence = actual.AsSequence();
+                    Assert.Equal(expectedSequence.Count, actualSequence.Count);
 
-                return;
-            }
+                    for (var index = 0; index < expectedSequence.Count; index++)
+                        AssertEquivalent(expectedSequence[index], actualSequence[index]);
+
+                    return;
+                }
             case IReadOnlyDictionary<string, TerraformDynamicValue> expectedObject:
-            {
-                var actualObject = actual.AsObject();
-                Assert.Equal(expectedObject.Count, actualObject.Count);
-
-                foreach (var pair in expectedObject)
                 {
-                    Assert.True(actualObject.ContainsKey(pair.Key), $"Expected attribute '{pair.Key}' to be present.");
-                    AssertEquivalent(pair.Value, actualObject[pair.Key]);
-                }
+                    var actualObject = actual.AsObject();
+                    Assert.Equal(expectedObject.Count, actualObject.Count);
 
-                return;
-            }
+                    foreach (var pair in expectedObject)
+                    {
+                        Assert.True(actualObject.ContainsKey(pair.Key), $"Expected attribute '{pair.Key}' to be present.");
+                        AssertEquivalent(pair.Value, actualObject[pair.Key]);
+                    }
+
+                    return;
+                }
             case TerraformDynamicValue expectedInnerValue:
-            {
-                var actualInnerValue = Assert.IsType<TerraformDynamicValue>(actual.Value);
-                AssertEquivalent(expectedInnerValue, actualInnerValue);
-                return;
-            }
+                {
+                    var actualInnerValue = Assert.IsType<TerraformDynamicValue>(actual.Value);
+                    AssertEquivalent(expectedInnerValue, actualInnerValue);
+                    return;
+                }
             default:
                 throw new InvalidOperationException($"Unsupported Terraform test value '{expected.Value?.GetType().Name}'.");
         }

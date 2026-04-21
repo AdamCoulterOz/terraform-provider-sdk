@@ -3,15 +3,17 @@ using TerraformPluginDotnet.Diagnostics;
 using TerraformPluginDotnet.Schema;
 using TerraformPluginDotnet.Types;
 
-namespace TerraformProviderFile;
+namespace File;
 
 internal sealed class FileProvider : TerraformProvider<FileProviderConfigModel, FileProviderState>
 {
+    public override string TypeName => "file";
+
     public override IEnumerable<TerraformResource<FileProviderState>> Resources =>
         [new FileManagedResource()];
 
     public override IEnumerable<TerraformDataSource<FileProviderState>> DataSources =>
-        [new FileReadDataSource()];
+        [];
 
     public override ValueTask<IReadOnlyList<TerraformDiagnostic>> ValidateConfigAsync(FileProviderConfigModel request, CancellationToken cancellationToken)
     {

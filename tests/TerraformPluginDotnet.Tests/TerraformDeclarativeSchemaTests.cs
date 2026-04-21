@@ -84,6 +84,14 @@ public sealed class TerraformDeclarativeSchemaTests
         Assert.Equal(TerraformType.String, id.Type);
     }
 
+    [Fact]
+    public void ForModel_RejectsRecursiveObjectAttributeModels()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() => TerraformDeclarativeSchema.For<RecursiveObjectModel>());
+
+        Assert.Contains("Recursive Terraform schema model", exception.Message, StringComparison.Ordinal);
+    }
+
     [TerraformSchemaModel(Version = 3, Description = "Example resource schema.")]
     private sealed class ExampleResourceModel
     {
@@ -160,5 +168,11 @@ public sealed class TerraformDeclarativeSchemaTests
 
         [TerraformAttribute(Computed = true)]
         public TF<string> Id { get; init; }
+    }
+
+    private sealed class RecursiveObjectModel
+    {
+        [TerraformAttribute]
+        public RecursiveObjectModel Child { get; init; } = null!;
     }
 }

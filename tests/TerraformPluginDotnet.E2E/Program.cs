@@ -1,33 +1,48 @@
 using System.Diagnostics;
+using System.Globalization;
+using System.Net;
+using System.Net.Sockets;
+using System.Security.Cryptography;
 using System.Text;
+using IoFile = System.IO.File;
 
 var repoRoot = FindRepoRoot();
 var artifactsRoot = Path.Combine(repoRoot, "tests", "TerraformPluginDotnet.E2E", "artifacts", Guid.NewGuid().ToString("n"));
-var providerOutput = Path.Combine(artifactsRoot, "provider");
-var terraformWorkdir = Path.Combine(artifactsRoot, "terraform");
-var dataDirectory = Path.Combine(artifactsRoot, "data");
-var terraformRcPath = Path.Combine(artifactsRoot, "terraform.rc");
-var providerProjectPath = Path.Combine(repoRoot, "samples", "TerraformProviderFile", "TerraformProviderFile.csproj");
 
-Directory.CreateDirectory(providerOutput);
-Directory.CreateDirectory(terraformWorkdir);
-Directory.CreateDirectory(dataDirectory);
+Directory.CreateDirectory(artifactsRoot);
 
-await RunAsync(
-    "dotnet",
-    ["publish", providerProjectPath, "-c", "Release", "-o", providerOutput],
-    repoRoot);
+await RunFileScenarioAsync(repoRoot, artifactsRoot);
+await RunAzureStorageScenarioAsync(repoRoot, artifactsRoot);
 
-var providerExecutable = Path.Combine(providerOutput, GetProviderExecutableName());
+Console.WriteLine("Terraform tfprotov6 end-to-end test passed.");
 
-if (!File.Exists(providerExecutable))
+return;
+
+static async Task RunFileScenarioAsync(string repoRoot, string artifactsRoot)
 {
-    throw new InvalidOperationException($"Expected published provider executable at '{providerExecutable}'.");
-}
+    var scenarioRoot = Path.Combine(artifactsRoot, "file");
+    var providerOutput = Path.Combine(scenarioRoot, "provider");
+    var terraformWorkdir = Path.Combine(scenarioRoot, "terraform");
+    var dataDirectory = Path.Combine(scenarioRoot, "data");
+    var terraformRcPath = Path.Combine(scenarioRoot, "terraform.rc");
+    var providerProjectPath = Path.Combine(repoRoot, "samples", "File", "File.csproj");
 
-File.WriteAllText(
-    terraformRcPath,
-    $@"provider_installation {{
+    Directory.CreateDirectory(providerOutput);
+    Directory.CreateDirectory(terraformWorkdir);
+    Directory.CreateDirectory(dataDirectory);
+
+    await RunAsync("dotnet", ["publish", providerProjectPath, "-c", "Release", "-o", providerOutput], repoRoot);
+
+    var providerExecutable = Path.Combine(providerOutput, GetProviderExecutableName("terraform-provider-file"));
+
+    if (!IoFile.Exists(providerExecutable))
+    {
+        throw new InvalidOperationException($"Expected published provider executable at '{providerExecutable}'.");
+    }
+
+    IoFile.WriteAllText(
+        terraformRcPath,
+        $@"provider_installation {{
   dev_overrides {{
     ""registry.terraform.io/example/file"" = ""{ToHclStringLiteral(providerOutput)}""
   }}
@@ -35,9 +50,9 @@ File.WriteAllText(
 }}
 ");
 
-File.WriteAllText(
-    Path.Combine(terraformWorkdir, "main.tf"),
-    $@"terraform {{
+    IoFile.WriteAllText(
+        Path.Combine(terraformWorkdir, "main.tf"),
+        $@"terraform {{
   required_providers {{
     file = {{
       source = ""example/file""
@@ -63,59 +78,246 @@ output ""content"" {{
 }}
 ");
 
-var environment = new Dictionary<string, string?>(StringComparer.Ordinal)
-{
-    ["TF_CLI_CONFIG_FILE"] = terraformRcPath,
-    ["TF_IN_AUTOMATION"] = "1",
-    ["CHECKPOINT_DISABLE"] = "1",
-};
+    var environment = CreateTerraformEnvironment(terraformRcPath);
 
-await RunAsync("terraform", ["apply", "-auto-approve", "-no-color"], terraformWorkdir, environment);
+    await RunAsync("terraform", ["providers", "schema", "-json"], terraformWorkdir, environment);
+    await RunAsync("terraform", ["validate", "-no-color"], terraformWorkdir, environment);
+    await RunAsync("terraform", ["apply", "-auto-approve", "-no-color"], terraformWorkdir, environment);
 
-var expectedFilePath = Path.Combine(dataDirectory, "hello.txt");
+    var expectedFilePath = Path.Combine(dataDirectory, "hello.txt");
 
-if (!File.Exists(expectedFilePath))
-{
-    throw new InvalidOperationException($"Expected Terraform to create '{expectedFilePath}'.");
+    if (!IoFile.Exists(expectedFilePath))
+    {
+        throw new InvalidOperationException($"Expected Terraform to create '{expectedFilePath}'.");
+    }
+
+    var fileContents = await IoFile.ReadAllTextAsync(expectedFilePath);
+
+    if (!string.Equals(fileContents, "hello from dotnet", StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException($"Unexpected file contents: '{fileContents}'.");
+    }
+
+    var outputResult = await RunAsync("terraform", ["output", "-raw", "content"], terraformWorkdir, environment);
+
+    if (!string.Equals(outputResult.StandardOutput.Trim(), "hello from dotnet", StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException($"Unexpected terraform output value: '{outputResult.StandardOutput.Trim()}'.");
+    }
+
+    var planResult = await RunAsync(
+        "terraform",
+        ["plan", "-detailed-exitcode", "-no-color"],
+        terraformWorkdir,
+        environment,
+        acceptedExitCodes: [0, 2]);
+
+    if (planResult.ExitCode != 0)
+    {
+        throw new InvalidOperationException(
+            $"Expected converged plan exit code 0, saw {planResult.ExitCode}.{Environment.NewLine}{planResult.CombinedOutput}");
+    }
+
+    await RunAsync("terraform", ["destroy", "-auto-approve", "-no-color"], terraformWorkdir, environment);
+
+    if (IoFile.Exists(expectedFilePath))
+    {
+        throw new InvalidOperationException($"Expected Terraform to delete '{expectedFilePath}'.");
+    }
 }
 
-var fileContents = await File.ReadAllTextAsync(expectedFilePath);
-
-if (!string.Equals(fileContents, "hello from dotnet", StringComparison.Ordinal))
+static async Task RunAzureStorageScenarioAsync(string repoRoot, string artifactsRoot)
 {
-    throw new InvalidOperationException($"Unexpected file contents: '{fileContents}'.");
+    var scenarioRoot = Path.Combine(artifactsRoot, "az_storage");
+    var providerOutput = Path.Combine(scenarioRoot, "provider");
+    var terraformWorkdir = Path.Combine(scenarioRoot, "terraform");
+    var azuriteDataDirectory = Path.Combine(scenarioRoot, "azurite");
+    var terraformRcPath = Path.Combine(scenarioRoot, "terraform.rc");
+    var providerProjectPath = Path.Combine(repoRoot, "samples", "Azure", "Azure.csproj");
+
+    Directory.CreateDirectory(providerOutput);
+    Directory.CreateDirectory(terraformWorkdir);
+    Directory.CreateDirectory(azuriteDataDirectory);
+
+    await RunAsync("dotnet", ["publish", providerProjectPath, "-c", "Release", "-o", providerOutput], repoRoot);
+
+    var providerExecutable = Path.Combine(providerOutput, GetProviderExecutableName("terraform-provider-az"));
+
+    if (!IoFile.Exists(providerExecutable))
+    {
+        throw new InvalidOperationException($"Expected published provider executable at '{providerExecutable}'.");
+    }
+
+    var blobPort = GetFreeTcpPort();
+    var accountName = "sdktest";
+    var accountKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(64));
+    var importId = $"/providers/Microsoft.Storage/storageAccounts/{accountName}/blobServices/default/containers/sdk-container/blobs/hello.txt";
+    var connectionString =
+        $"DefaultEndpointsProtocol=http;AccountName={accountName};AccountKey={accountKey};BlobEndpoint=http://127.0.0.1:{blobPort}/{accountName};";
+
+    using var azuriteProcess = StartBackgroundProcess(
+        "npx",
+        [
+            "--yes",
+            "azurite",
+            "--silent",
+            "--skipApiVersionCheck",
+            "--location", azuriteDataDirectory,
+            "--blobHost", "127.0.0.1",
+            "--blobPort", blobPort.ToString(CultureInfo.InvariantCulture),
+        ],
+        repoRoot,
+        new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            ["AZURITE_ACCOUNTS"] = $"{accountName}:{accountKey}",
+        });
+
+    try
+    {
+        await WaitForTcpPortAsync(IPAddress.Loopback, blobPort);
+
+        IoFile.WriteAllText(
+            terraformRcPath,
+            $@"provider_installation {{
+  dev_overrides {{
+    ""registry.terraform.io/example/az"" = ""{ToHclStringLiteral(providerOutput)}""
+  }}
+  direct {{}}
+}}
+");
+
+        IoFile.WriteAllText(
+            Path.Combine(terraformWorkdir, "main.tf"),
+            $@"terraform {{
+  required_providers {{
+    az = {{
+      source = ""example/az""
+    }}
+  }}
+}}
+
+provider ""az"" {{
+  connection_string = ""{ToHclStringLiteral(connectionString)}""
+}}
+
+resource ""az_storage_blob"" ""sample"" {{
+  container_name = ""sdk-container""
+  blob_name      = ""hello.txt""
+  content        = ""hello from azure dotnet""
+}}
+
+data ""az_storage_blob"" ""sample"" {{
+  container_name = az_storage_blob.sample.container_name
+  blob_name      = az_storage_blob.sample.blob_name
+}}
+
+output ""content"" {{
+  value = data.az_storage_blob.sample.content
+}}
+");
+
+        var environment = CreateTerraformEnvironment(terraformRcPath);
+
+        var schemaResult = await RunAsync("terraform", ["providers", "schema", "-json"], terraformWorkdir, environment);
+
+        if (!schemaResult.StandardOutput.Contains("az_storage_blob", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Terraform provider schema did not contain az_storage_blob.");
+        }
+
+        await RunAsync("terraform", ["validate", "-no-color"], terraformWorkdir, environment);
+        await RunAsync("terraform", ["apply", "-auto-approve", "-no-color"], terraformWorkdir, environment);
+
+        var outputResult = await RunAsync("terraform", ["output", "-raw", "content"], terraformWorkdir, environment);
+
+        if (!string.Equals(outputResult.StandardOutput.Trim(), "hello from azure dotnet", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException($"Unexpected az output value: '{outputResult.StandardOutput.Trim()}'.");
+        }
+
+        await RunAsync("terraform", ["state", "rm", "az_storage_blob.sample"], terraformWorkdir, environment);
+        await RunAsync("terraform", ["import", "az_storage_blob.sample", importId], terraformWorkdir, environment);
+
+        var planResult = await RunAsync(
+            "terraform",
+            ["plan", "-detailed-exitcode", "-no-color"],
+            terraformWorkdir,
+            environment,
+            acceptedExitCodes: [0, 2]);
+
+        if (planResult.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"Expected converged az plan exit code 0, saw {planResult.ExitCode}.{Environment.NewLine}{planResult.CombinedOutput}");
+        }
+
+        await RunAsync("terraform", ["destroy", "-auto-approve", "-no-color"], terraformWorkdir, environment);
+    }
+    finally
+    {
+        TryStopProcess(azuriteProcess);
+    }
 }
 
-var outputResult = await RunAsync("terraform", ["output", "-raw", "content"], terraformWorkdir, environment);
+static IReadOnlyDictionary<string, string?> CreateTerraformEnvironment(string terraformRcPath) =>
+    new Dictionary<string, string?>(StringComparer.Ordinal)
+    {
+        ["TF_CLI_CONFIG_FILE"] = terraformRcPath,
+        ["TF_IN_AUTOMATION"] = "1",
+        ["CHECKPOINT_DISABLE"] = "1",
+    };
 
-if (!string.Equals(outputResult.StandardOutput.Trim(), "hello from dotnet", StringComparison.Ordinal))
+static Process StartBackgroundProcess(
+    string fileName,
+    IReadOnlyList<string> arguments,
+    string workingDirectory,
+    IReadOnlyDictionary<string, string?>? additionalEnvironment = null)
 {
-    throw new InvalidOperationException($"Unexpected terraform output value: '{outputResult.StandardOutput.Trim()}'.");
+    var startInfo = new ProcessStartInfo
+    {
+        FileName = fileName,
+        WorkingDirectory = workingDirectory,
+        UseShellExecute = false,
+    };
+
+    foreach (var argument in arguments)
+    {
+        startInfo.ArgumentList.Add(argument);
+    }
+
+    if (additionalEnvironment is not null)
+    {
+        foreach (var pair in additionalEnvironment)
+        {
+            startInfo.Environment[pair.Key] = pair.Value;
+        }
+    }
+
+    var process = new Process { StartInfo = startInfo };
+    process.Start();
+    return process;
 }
 
-var planResult = await RunAsync(
-    "terraform",
-    ["plan", "-detailed-exitcode", "-no-color"],
-    terraformWorkdir,
-    environment,
-    acceptedExitCodes: [0, 2]);
-
-if (planResult.ExitCode != 0)
+static async Task WaitForTcpPortAsync(IPAddress address, int port)
 {
-    throw new InvalidOperationException(
-        $"Expected converged plan exit code 0, saw {planResult.ExitCode}.{Environment.NewLine}{planResult.CombinedOutput}");
+    var timeoutAt = DateTimeOffset.UtcNow.AddSeconds(20);
+
+    while (DateTimeOffset.UtcNow < timeoutAt)
+    {
+        try
+        {
+            using var client = new TcpClient();
+            await client.ConnectAsync(address, port);
+            return;
+        }
+        catch (SocketException)
+        {
+            await Task.Delay(200);
+        }
+    }
+
+    throw new TimeoutException($"Timed out waiting for TCP {address}:{port}.");
 }
-
-await RunAsync("terraform", ["destroy", "-auto-approve", "-no-color"], terraformWorkdir, environment);
-
-if (File.Exists(expectedFilePath))
-{
-    throw new InvalidOperationException($"Expected Terraform to delete '{expectedFilePath}'.");
-}
-
-Console.WriteLine("Terraform tfprotov6 end-to-end test passed.");
-
-return;
 
 static async Task<CommandResult> RunAsync(
     string fileName,
@@ -169,13 +371,20 @@ static async Task<CommandResult> RunAsync(
     return result;
 }
 
+static int GetFreeTcpPort()
+{
+    using var listener = new TcpListener(IPAddress.Loopback, 0);
+    listener.Start();
+    return ((IPEndPoint)listener.LocalEndpoint).Port;
+}
+
 static string FindRepoRoot()
 {
     var current = new DirectoryInfo(AppContext.BaseDirectory);
 
     while (current is not null)
     {
-        if (File.Exists(Path.Combine(current.FullName, "TerraformPluginDotnet.slnx")) &&
+        if (IoFile.Exists(Path.Combine(current.FullName, "TerraformPluginDotnet.slnx")) &&
             Directory.Exists(Path.Combine(current.FullName, "src")) &&
             Directory.Exists(Path.Combine(current.FullName, "samples")) &&
             Directory.Exists(Path.Combine(current.FullName, "tests")))
@@ -189,10 +398,10 @@ static string FindRepoRoot()
     throw new InvalidOperationException("Could not locate repository root.");
 }
 
-static string GetProviderExecutableName() =>
+static string GetProviderExecutableName(string baseName) =>
     OperatingSystem.IsWindows()
-        ? "terraform-provider-file.exe"
-        : "terraform-provider-file";
+        ? $"{baseName}.exe"
+        : baseName;
 
 static string ToHclStringLiteral(string value)
 {
@@ -214,6 +423,21 @@ static string ToHclStringLiteral(string value)
     return builder.ToString();
 }
 
+static void TryStopProcess(Process process)
+{
+    try
+    {
+        if (!process.HasExited)
+        {
+            process.Kill(entireProcessTree: true);
+            process.WaitForExit();
+        }
+    }
+    catch (InvalidOperationException)
+    {
+    }
+}
+
 internal sealed record CommandResult(
     string FileName,
     IReadOnlyList<string> Arguments,
@@ -221,7 +445,7 @@ internal sealed record CommandResult(
     string StandardOutput,
     string StandardError)
 {
-    public string CommandLine => string.Join(" ", [FileName, ..Arguments]);
+    public string CommandLine => string.Join(" ", [FileName, .. Arguments]);
 
     public string CombinedOutput
     {

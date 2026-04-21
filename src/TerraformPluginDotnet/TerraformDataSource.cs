@@ -6,8 +6,7 @@ namespace TerraformPluginDotnet;
 
 public abstract class TerraformDataSource<TProviderState>
 {
-    public abstract string TypeName { get; }
-
+    public abstract string Name { get; }
     internal abstract ITerraformDataSource ToInternalDataSource();
 }
 

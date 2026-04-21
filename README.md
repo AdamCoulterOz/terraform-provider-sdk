@@ -6,7 +6,7 @@ An experimental .NET-native Terraform provider SDK that targets protocol v6 dire
 
 Provider authors work with typed classes, conventions, optional override attributes, and lifecycle methods. The tfprotov6 and gRPC plumbing stays inside the host/runtime layer.
 
-Public settable properties participate in schema inference by default. Member names are derived from PascalCase to `snake_case`. Use `TerraformAttribute` or `TerraformNestedBlock` only when you need to override the default shape or add metadata such as `Computed`, `Optional`, descriptions, or explicit nesting rules.
+The main authoring surface is now self-typed: the resource class is the schema source, the bound Terraform object, and the behavior implementation. Public properties define the Terraform shape. PascalCase member names become `snake_case`. Writable members become inputs, getter-only or explicitly computed members become outputs, and `[DataSourceQuery]` methods generate Terraform data sources from method parameters plus the resource's output shape.
 
 ```csharp
 using TerraformPluginDotnet;
@@ -19,8 +19,10 @@ return await TerraformProviderHost.RunAsync(new ExampleProvider(), args);
 
 internal sealed class ExampleProvider : TerraformProvider<ExampleProviderConfig, ExampleProviderState>
 {
+    public override string TypeName => "example";
+
     public override IEnumerable<TerraformResource<ExampleProviderState>> Resources =>
-        [new WidgetResource()];
+        [new Widget()];
 
     public override IEnumerable<TerraformDataSource<ExampleProviderState>> DataSources => [];
 
@@ -39,38 +41,52 @@ internal sealed class ExampleProviderConfig
     public TF<string> Endpoint { get; init; }
 }
 
-internal sealed class WidgetResource : TerraformResource<WidgetModel, ExampleProviderState>
+internal sealed class Widget : TerraformResource<Widget, ExampleProviderState>
 {
-    public override string TypeName => "example_widget";
+    public override string Name => "widget";
 
-    public override ValueTask<TerraformPlanResult<WidgetModel>> PlanAsync(
-        WidgetModel? priorState,
-        WidgetModel? proposedState,
-        TerraformResourceContext<ExampleProviderState> context,
-        CancellationToken cancellationToken) =>
-        ValueTask.FromResult(new TerraformPlanResult<WidgetModel>(proposedState));
-
-    public override ValueTask<TerraformModelResult<WidgetModel>> ApplyAsync(
-        WidgetModel? priorState,
-        WidgetModel? plannedState,
-        TerraformResourceContext<ExampleProviderState> context,
-        CancellationToken cancellationToken) =>
-        ValueTask.FromResult(new TerraformModelResult<WidgetModel>(plannedState));
-
-    public override ValueTask<TerraformModelResult<WidgetModel>> ReadAsync(
-        WidgetModel? currentState,
-        TerraformResourceContext<ExampleProviderState> context,
-        CancellationToken cancellationToken) =>
-        ValueTask.FromResult(new TerraformModelResult<WidgetModel>(currentState));
-}
-
-internal sealed class WidgetModel
-{
-    [TerraformAttribute]
-    public TF<string> Name { get; init; }
+    public required TF<string> Name { get; init; }
 
     [TerraformAttribute(Computed = true)]
     public TF<string> Id { get; init; }
+
+    public override ValueTask<TerraformPlanResult<Widget>> PlanAsync(
+        Widget? priorState,
+        TerraformResourceContext<ExampleProviderState> context,
+        CancellationToken cancellationToken) =>
+        ValueTask.FromResult(new TerraformPlanResult<Widget>(this));
+
+    public override ValueTask<TerraformModelResult<Widget>> ApplyAsync(
+        Widget? priorState,
+        TerraformResourceContext<ExampleProviderState> context,
+        CancellationToken cancellationToken) =>
+        ValueTask.FromResult(new TerraformModelResult<Widget>(new Widget
+        {
+            Name = Name,
+            Id = TF<string>.Known($"{context.ProviderState.Endpoint}/{Name.RequireValue()}"),
+        }));
+
+    public override ValueTask<TerraformModelResult<Widget>> ReadAsync(
+        TerraformResourceContext<ExampleProviderState> context,
+        CancellationToken cancellationToken) =>
+        ValueTask.FromResult(new TerraformModelResult<Widget>(this));
+
+    public override ValueTask<TerraformModelResult<Widget>> DeleteAsync(
+        Widget? priorState,
+        TerraformResourceContext<ExampleProviderState> context,
+        CancellationToken cancellationToken) =>
+        ValueTask.FromResult(new TerraformModelResult<Widget>(null));
+
+    [DataSourceQuery]
+    public static ValueTask<Widget?> GetAsync(
+        ExampleProviderState providerState,
+        TF<string> name,
+        CancellationToken cancellationToken) =>
+        ValueTask.FromResult<Widget?>(new Widget
+        {
+            Name = name,
+            Id = TF<string>.Known($"{providerState.Endpoint}/{name.RequireValue()}"),
+        });
 }
 ```
 
@@ -82,10 +98,13 @@ internal sealed class WidgetModel
   - Runtime SDK surface.
 - `proto/`
   - Vendored protobuf definitions used to generate the gRPC server bindings.
-- `samples/TerraformProviderFile`
+- `samples/File`
   - A small working provider that manages files on disk.
+- `samples/Azure`
+  - A working provider that manages Azure Blob Storage content through `Azure.Storage.Blobs`.
+  - The root Terraform provider type is `az`, while Azure Resource Provider nodes such as `Storage : AzureProvider("Microsoft.Storage")` contribute composed child names like `az_storage_blob`.
 - `tests/TerraformPluginDotnet.E2E`
-  - Publishes the sample provider and runs it through the real Terraform CLI.
+  - Publishes the sample providers and runs them through the real Terraform CLI.
 
 ## Design Goals
 
@@ -100,7 +119,8 @@ internal sealed class WidgetModel
 
 Implemented:
 
-- typed provider/resource/data source authoring surface
+- typed provider/resource authoring surface with self-typed resource classes
+- query-generated data sources via `[DataSourceQuery]`
 - declarative schema modeling with attributes
 - diagnostics and attribute paths
 - Terraform type/value modeling
@@ -108,7 +128,9 @@ Implemented:
 - internal tfprotov6 adapter layer
 - go-plugin bootstrap services
 - automatic mTLS handshake support required by Terraform CLI
-- sample provider verified with real Terraform CLI apply/plan/destroy
+- same-type resource import support
+- private state passthrough on typed resources
+- sample providers verified with real Terraform CLI schema/apply/import/plan/destroy
 
 Not implemented yet:
 
@@ -129,4 +151,6 @@ From the repository root:
 dotnet run --project tests/TerraformPluginDotnet.E2E/TerraformPluginDotnet.E2E.csproj
 ```
 
-That command publishes `samples/TerraformProviderFile`, runs Terraform with a development override, applies configuration, verifies convergence, and destroys the created resource.
+That command publishes `samples/File`, runs Terraform with a development override, applies configuration, verifies convergence, and destroys the created resource.
+
+The end-to-end harness also publishes `samples/Azure`, starts a local Azurite blob emulator, and exercises the `example/az` provider with the `az_storage_blob` resource/data source through the real Terraform CLI.

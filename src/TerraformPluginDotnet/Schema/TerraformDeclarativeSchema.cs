@@ -6,20 +6,19 @@ namespace TerraformPluginDotnet.Schema;
 
 public static class TerraformDeclarativeSchema
 {
-    private static readonly NullabilityInfoContext Nullability = new();
-
     public static TerraformComponentSchema For<T>() => For(typeof(T));
 
     public static TerraformComponentSchema For(Type modelType)
     {
+        var context = new SchemaInferenceContext(new NullabilityInfoContext());
         var schemaModel = modelType.GetCustomAttribute<TerraformSchemaModelAttribute>();
 
         return new TerraformComponentSchema(
-            BuildBlock(modelType, schemaModel),
+            BuildBlock(modelType, schemaModel, context),
             schemaModel?.Version ?? 0);
     }
 
-    private static TerraformSchemaBlock BuildBlock(Type modelType, TerraformSchemaModelAttribute? schemaModel)
+    private static TerraformSchemaBlock BuildBlock(Type modelType, TerraformSchemaModelAttribute? schemaModel, SchemaInferenceContext context)
     {
         var attributes = new Dictionary<string, TerraformSchemaAttribute>(StringComparer.Ordinal);
         var nestedBlocks = new Dictionary<string, TerraformSchemaNestedBlock>(StringComparer.Ordinal);
@@ -29,13 +28,13 @@ public static class TerraformDeclarativeSchema
             if (TerraformModelConventions.IsNestedBlockMember(member))
             {
                 var nestedBlock = member.GetCustomAttribute<TerraformNestedBlockAttribute>(inherit: true);
-                var schema = BuildNestedBlock(member, nestedBlock);
+                var schema = BuildNestedBlock(member, nestedBlock, context);
                 nestedBlocks.Add(schema.TypeName, schema);
             }
             else
             {
                 var attribute = member.GetCustomAttribute<TerraformAttributeAttribute>(inherit: true);
-                var schema = BuildAttribute(member, attribute);
+                var schema = BuildAttribute(member, attribute, context);
                 attributes.Add(schema.Name, schema);
             }
         }
@@ -49,11 +48,11 @@ public static class TerraformDeclarativeSchema
             schemaModel?.DeprecationMessage ?? string.Empty);
     }
 
-    private static TerraformSchemaAttribute BuildAttribute(MemberInfo member, TerraformAttributeAttribute? attribute)
+    private static TerraformSchemaAttribute BuildAttribute(MemberInfo member, TerraformAttributeAttribute? attribute, SchemaInferenceContext context)
     {
         var memberType = TerraformModelConventions.GetMemberType(member);
-        var terraformType = InferTerraformType(member, memberType);
-        var semantics = InferAttributeSemantics(member, memberType, attribute);
+        var terraformType = InferTerraformType(member, memberType, context);
+        var semantics = InferAttributeSemantics(member, memberType, attribute, context);
         var name = TerraformModelConventions.GetSchemaMemberName(member);
 
         return new TerraformSchemaAttribute(
@@ -70,7 +69,7 @@ public static class TerraformDeclarativeSchema
             attribute?.DeprecationMessage ?? string.Empty);
     }
 
-    private static TerraformSchemaNestedBlock BuildNestedBlock(MemberInfo member, TerraformNestedBlockAttribute? attribute)
+    private static TerraformSchemaNestedBlock BuildNestedBlock(MemberInfo member, TerraformNestedBlockAttribute? attribute, SchemaInferenceContext context)
     {
         var memberType = TerraformModelConventions.GetMemberType(member);
         var nesting = attribute?.Nesting ?? InferNestedBlockNesting(memberType);
@@ -80,16 +79,16 @@ public static class TerraformDeclarativeSchema
         return new TerraformSchemaNestedBlock(
             typeName,
             nesting,
-            BuildBlock(blockType, blockType.GetCustomAttribute<TerraformSchemaModelAttribute>()),
+            BuildBlock(blockType, blockType.GetCustomAttribute<TerraformSchemaModelAttribute>(), context),
             attribute?.MinItems ?? 0,
             attribute?.MaxItems ?? 0);
     }
 
-    private static TerraformType InferTerraformType(MemberInfo member, Type memberType)
+    private static TerraformType InferTerraformType(MemberInfo member, Type memberType, SchemaInferenceContext context)
     {
         if (TerraformModelConventions.TryGetTerraformValueType(memberType, out var wrappedType))
         {
-            return InferTerraformType(member, wrappedType);
+            return InferTerraformType(member, wrappedType, context);
         }
 
         memberType = Nullable.GetUnderlyingType(memberType) ?? memberType;
@@ -111,56 +110,70 @@ public static class TerraformDeclarativeSchema
 
         if (TryGetDictionaryValueType(memberType, out var dictionaryValueType))
         {
-            return new TerraformMapType(InferTerraformType(member, dictionaryValueType));
+            return new TerraformMapType(InferTerraformType(member, dictionaryValueType, context));
         }
 
         if (TryGetSetElementType(memberType, out var setElementType))
         {
-            return new TerraformSetType(InferTerraformType(member, setElementType));
+            return new TerraformSetType(InferTerraformType(member, setElementType, context));
         }
 
         if (TryGetEnumerableElementType(memberType, out var enumerableElementType))
         {
-            return new TerraformListType(InferTerraformType(member, enumerableElementType));
+            return new TerraformListType(InferTerraformType(member, enumerableElementType, context));
         }
 
-        return InferObjectType(memberType);
+        return InferObjectType(memberType, context);
     }
 
-    private static TerraformObjectType InferObjectType(Type modelType)
+    private static TerraformObjectType InferObjectType(Type modelType, SchemaInferenceContext context)
     {
+        if (!context.ActiveObjectTypes.Add(modelType))
+        {
+            throw new InvalidOperationException(
+                $"Recursive Terraform schema model '{modelType.Name}' is not supported. Break the cycle or model the relationship as an identifier instead.");
+        }
+
         var attributeTypes = new Dictionary<string, TerraformType>(StringComparer.Ordinal);
         var optionalAttributes = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var member in TerraformModelConventions.GetIncludedMembers(modelType))
+        try
         {
-            if (TerraformModelConventions.IsNestedBlockMember(member))
+            foreach (var member in TerraformModelConventions.GetIncludedMembers(modelType))
             {
-                throw new InvalidOperationException(
-                    $"Nested blocks are not valid inside Terraform object attribute models. Member '{modelType.Name}.{member.Name}' must be represented as an attribute object instead.");
+                if (TerraformModelConventions.IsNestedBlockMember(member))
+                {
+                    throw new InvalidOperationException(
+                        $"Nested blocks are not valid inside Terraform object attribute models. Member '{modelType.Name}.{member.Name}' must be represented as an attribute object instead.");
+                }
+
+                var attribute = member.GetCustomAttribute<TerraformAttributeAttribute>(inherit: true);
+                var memberType = TerraformModelConventions.GetMemberType(member);
+                var terraformType = InferTerraformType(member, memberType, context);
+                var semantics = InferAttributeSemantics(member, memberType, attribute, context);
+                var name = TerraformModelConventions.GetSchemaMemberName(member);
+
+                attributeTypes.Add(name, terraformType);
+
+                if (semantics.Optional)
+                {
+                    optionalAttributes.Add(name);
+                }
             }
 
-            var attribute = member.GetCustomAttribute<TerraformAttributeAttribute>(inherit: true);
-            var memberType = TerraformModelConventions.GetMemberType(member);
-            var terraformType = InferTerraformType(member, memberType);
-            var semantics = InferAttributeSemantics(member, memberType, attribute);
-            var name = TerraformModelConventions.GetSchemaMemberName(member);
-
-            attributeTypes.Add(name, terraformType);
-
-            if (semantics.Optional)
-            {
-                optionalAttributes.Add(name);
-            }
+            return new TerraformObjectType(attributeTypes, optionalAttributes);
         }
-
-        return new TerraformObjectType(attributeTypes, optionalAttributes);
+        finally
+        {
+            context.ActiveObjectTypes.Remove(modelType);
+        }
     }
 
     private static (bool Required, bool Optional, bool Computed) InferAttributeSemantics(
         MemberInfo member,
         Type memberType,
-        TerraformAttributeAttribute? attribute)
+        TerraformAttributeAttribute? attribute,
+        SchemaInferenceContext context)
     {
         if (attribute?.Required == true && attribute.Optional)
         {
@@ -179,12 +192,22 @@ public static class TerraformDeclarativeSchema
             return (attribute.Required, attribute.Optional, attribute.Computed);
         }
 
-        return IsNullable(member, memberType)
+        if (!TerraformModelConventions.IsInputMember(member))
+        {
+            return (false, false, true);
+        }
+
+        if (TerraformModelConventions.IsRequiredMember(member))
+        {
+            return (true, false, false);
+        }
+
+        return IsNullable(member, memberType, context)
             ? (false, true, false)
             : (true, false, false);
     }
 
-    private static bool IsNullable(MemberInfo member, Type memberType)
+    private static bool IsNullable(MemberInfo member, Type memberType, SchemaInferenceContext context)
     {
         if (Nullable.GetUnderlyingType(memberType) is not null)
         {
@@ -198,8 +221,8 @@ public static class TerraformDeclarativeSchema
 
         return member switch
         {
-            PropertyInfo property => Nullability.Create(property).ReadState == NullabilityState.Nullable,
-            FieldInfo field => Nullability.Create(field).ReadState == NullabilityState.Nullable,
+            PropertyInfo property => context.Nullability.Create(property).ReadState == NullabilityState.Nullable,
+            FieldInfo field => context.Nullability.Create(field).ReadState == NullabilityState.Nullable,
             _ => false,
         };
     }
@@ -325,5 +348,10 @@ public static class TerraformDeclarativeSchema
         }
 
         return null;
+    }
+
+    private sealed record SchemaInferenceContext(NullabilityInfoContext Nullability)
+    {
+        public HashSet<Type> ActiveObjectTypes { get; } = new();
     }
 }

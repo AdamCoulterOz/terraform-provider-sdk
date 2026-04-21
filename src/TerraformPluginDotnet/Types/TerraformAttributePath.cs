@@ -2,14 +2,9 @@ using System.Collections.ObjectModel;
 
 namespace TerraformPluginDotnet.Types;
 
-public sealed class TerraformAttributePath : IEquatable<TerraformAttributePath>
+public sealed class TerraformAttributePath(IEnumerable<TerraformAttributePathStep> steps) : IEquatable<TerraformAttributePath>
 {
-    private readonly ReadOnlyCollection<TerraformAttributePathStep> _steps;
-
-    public TerraformAttributePath(IEnumerable<TerraformAttributePathStep> steps)
-    {
-        _steps = steps.ToList().AsReadOnly();
-    }
+    private readonly ReadOnlyCollection<TerraformAttributePathStep> _steps = steps.ToList().AsReadOnly();
 
     public IReadOnlyList<TerraformAttributePathStep> Steps => _steps;
 

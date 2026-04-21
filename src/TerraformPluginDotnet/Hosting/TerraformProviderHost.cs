@@ -167,6 +167,8 @@ public static class TerraformProviderHost
         subjectAlternativeName.AddIpAddress(IPAddress.Loopback);
         certificateRequest.CertificateExtensions.Add(subjectAlternativeName.Build());
 
+        // The certificate is per provider process and effectively ephemeral in practice,
+        // so a long validity window avoids clock-skew surprises during local Terraform runs.
         var notBefore = DateTimeOffset.UtcNow.AddSeconds(-30);
         var notAfter = DateTimeOffset.UtcNow.AddHours(262980);
         return certificateRequest.CreateSelfSigned(notBefore, notAfter);
